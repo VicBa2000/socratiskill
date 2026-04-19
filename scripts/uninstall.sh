@@ -36,10 +36,17 @@ assert_safe_state_dir() {
     echo "[abort] SOCRATIC_STATE_DIR is empty — refusing to run rm -rf on empty path." >&2
     exit 2
   fi
-  if [[ "$dir" != /* ]]; then
-    echo "[abort] SOCRATIC_STATE_DIR must be an absolute path, got: $dir" >&2
-    exit 2
-  fi
+  # Accept both POSIX absolute (/c/Users/...) and Windows-native
+  # absolute (C:/Users/...). Both styles appear on Git Bash depending
+  # on how the env var was set; rejecting Windows-native would leave
+  # power users unable to override the state dir via Command Prompt.
+  case "$dir" in
+    /*|[A-Za-z]:/*|[A-Za-z]:\\*) ;;
+    *)
+      echo "[abort] SOCRATIC_STATE_DIR must be an absolute path, got: $dir" >&2
+      exit 2
+      ;;
+  esac
   case "$dir" in
     /|/root|/home|/Users|/tmp|"$HOME"|"$HOME/")
       echo "[abort] refusing to rm -rf a root-level / home path: $dir" >&2
