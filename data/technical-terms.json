@@ -1,0 +1,16 @@
+{
+  "_comment": "Technical vocabulary used by Detector.countTechnicalTerms to signal user level. A message containing >=2 terms from this list bumps their perceived level. Keep terms short, lowercased; match is substring (case-insensitive). Community contributors: add jargon from other domains (ML, DevOps, security, etc).",
+  "terms": [
+    "abstraction", "encapsulation", "polymorphism", "inheritance",
+    "composition", "dependency injection", "inversion of control",
+    "singleton", "factory", "observer", "strategy", "middleware",
+    "binary tree", "hash map", "linked list", "graph traversal",
+    "heap", "trie", "bloom filter",
+    "time complexity", "space complexity", "big-o", "memoization",
+    "lazy evaluation", "garbage collection", "memory leak",
+    "race condition", "deadlock", "mutex",
+    "idempotent", "stateless", "serialization",
+    "orm", "migration", "transaction isolation",
+    "eventual consistency", "sharding", "replication"
+  ]
+}

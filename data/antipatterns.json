@@ -1,0 +1,52 @@
+{
+  "_comment": "Antipattern definitions. Each regex is a JS RegExp source (double-escaped for JSON). Thresholds: activate at >=3 occurrences total; deactivate after >=5 consecutive clean turns. State lives in ~/.claude/socratic/antipatterns.json.",
+  "activation_threshold": 3,
+  "deactivation_clean_streak": 5,
+  "antipatterns": [
+    {
+      "id": "js-loose-eq",
+      "name": "Loose equality (==, !=)",
+      "language": "javascript",
+      "severity": "medium",
+      "regex": "(?<![=!<>])[!=]=(?!=)",
+      "flags": "g",
+      "fix": "Use === and !== for type-safe comparison."
+    },
+    {
+      "id": "js-var",
+      "name": "var declaration",
+      "language": "javascript",
+      "severity": "low",
+      "regex": "\\bvar\\s+[a-zA-Z_$][\\w$]*\\s*=",
+      "flags": "g",
+      "fix": "Prefer const; use let only when reassignment is required."
+    },
+    {
+      "id": "js-unhandled-promise",
+      "name": "Unhandled promise (.then without .catch)",
+      "language": "javascript",
+      "severity": "high",
+      "regex": "\\.then\\s*\\([^)]*\\)(?!\\s*\\.(?:catch|then|finally))",
+      "flags": "g",
+      "fix": "Chain .catch() or use try/catch with async/await."
+    },
+    {
+      "id": "py-mutable-default",
+      "name": "Mutable default argument",
+      "language": "python",
+      "severity": "high",
+      "regex": "def\\s+[a-zA-Z_]\\w*\\s*\\([^)]*=\\s*(?:\\[\\s*\\]|\\{\\s*\\})",
+      "flags": "g",
+      "fix": "Use None as default; create the list/dict inside the function body."
+    },
+    {
+      "id": "py-bare-except",
+      "name": "Bare except",
+      "language": "python",
+      "severity": "medium",
+      "regex": "except\\s*:",
+      "flags": "g",
+      "fix": "Catch specific exception types (e.g., except ValueError:)."
+    }
+  ]
+}

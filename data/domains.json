@@ -1,0 +1,115 @@
+{
+  "_comment": "Knowledge domains for SocraticCode. Each domain has a display label and a list of keywords used to auto-detect which domain a user message touches. Matches are case-insensitive; keywords <= 3 chars use word-boundary matching to avoid false positives. Community contributors: add keywords to existing domains or propose a new domain via PR.",
+  "fundamentos": {
+    "label": "Fundamentals",
+    "keywords": [
+      "variable", "variables", "const", "let", "var",
+      "if", "else", "switch", "for", "while", "loop", "loops",
+      "function", "functions", "arrow function", "callback",
+      "array", "object", "map", "set", "stack", "queue", "linked list",
+      "tree", "graph", "hash", "hashmap", "hashtable",
+      "algorithm", "sorting", "sort", "binary search", "recursion", "recursive",
+      "big-o", "complexity", "time complexity", "space complexity",
+      "data structure", "data structures", "string", "strings",
+      "number", "boolean", "null", "undefined", "type", "types",
+      "scope", "closure", "closures", "hoisting"
+    ]
+  },
+  "lenguajes": {
+    "label": "Languages",
+    "keywords": [
+      "javascript", "typescript", "python", "go", "golang",
+      "rust", "java", "c++", "c#", "csharp", "ruby", "php",
+      "swift", "kotlin", "scala", "elixir", "haskell",
+      "sql", "plsql", "tsql",
+      "jsx", "tsx", "es6", "es2015", "ecmascript",
+      "pip", "cargo", "maven", "gradle",
+      "type annotation", "generics", "generic", "enum", "interface",
+      "decorator", "decorators"
+    ]
+  },
+  "paradigmas": {
+    "label": "Paradigms",
+    "keywords": [
+      "oop", "object oriented", "class", "classes", "inheritance",
+      "polymorphism", "encapsulation", "abstraction",
+      "solid", "single responsibility", "open closed",
+      "liskov", "interface segregation", "dependency inversion",
+      "functional", "pure function", "immutable", "immutability",
+      "higher order", "currying", "composition", "monad", "functor",
+      "reactive", "rxjs", "observable", "observer",
+      "async", "await", "promise", "promises", "concurrency",
+      "parallel", "thread", "threads", "mutex", "semaphore",
+      "event loop", "callback hell"
+    ]
+  },
+  "web": {
+    "label": "Web",
+    "keywords": [
+      "html", "css", "dom", "browser",
+      "react", "vue", "angular", "svelte", "next", "nextjs", "nuxt",
+      "component", "components", "jsx", "hook", "hooks", "useState", "useEffect",
+      "state management", "redux", "zustand", "context",
+      "node", "nodejs", "express", "fastify", "koa", "hono", "bun",
+      "rest", "restful", "api", "endpoint", "endpoints",
+      "graphql", "websocket", "websockets", "sse",
+      "fetch", "axios", "http client",
+      "cors", "cookie", "cookies", "session", "sessions",
+      "tailwind", "styled-components", "css-in-js", "sass", "scss",
+      "responsive", "accessibility", "a11y", "seo"
+    ]
+  },
+  "backend": {
+    "label": "Backend",
+    "keywords": [
+      "database", "databases", "db", "sql", "nosql",
+      "postgres", "postgresql", "mysql", "sqlite", "mongodb", "redis",
+      "orm", "drizzle", "prisma", "sequelize", "typeorm",
+      "schema", "migration", "migrations", "index", "indexes",
+      "query", "queries", "join", "joins", "transaction", "transactions",
+      "auth", "authentication", "authorization", "jwt", "oauth",
+      "bcrypt", "password", "token", "tokens",
+      "microservice", "microservices", "serverless", "lambda",
+      "message queue", "rabbitmq", "kafka", "pub/sub",
+      "test", "testing", "unit test", "integration test", "e2e",
+      "jest", "vitest", "mocha", "pytest",
+      "ci", "cd", "ci/cd", "pipeline", "github actions",
+      "docker", "dockerfile", "container", "containers",
+      "kubernetes", "k8s", "helm"
+    ]
+  },
+  "infraestructura": {
+    "label": "Infrastructure",
+    "keywords": [
+      "git", "github", "gitlab", "bitbucket",
+      "branch", "merge", "rebase", "commit", "pull request", "pr",
+      "linux", "terminal", "bash", "shell", "zsh", "powershell",
+      "ssh", "scp", "rsync",
+      "http", "https", "tcp", "udp", "dns", "ip",
+      "network", "networking", "port", "ports", "proxy", "nginx",
+      "load balancer", "cdn",
+      "aws", "gcp", "azure", "cloud", "s3", "ec2", "lambda",
+      "terraform", "ansible", "cloudformation",
+      "security", "owasp", "xss", "csrf", "injection",
+      "ssl", "tls", "certificate", "firewall",
+      "monitoring", "logging", "prometheus", "grafana"
+    ]
+  },
+  "avanzado": {
+    "label": "Advanced",
+    "keywords": [
+      "system design", "architecture", "distributed",
+      "design pattern", "design patterns", "factory", "singleton",
+      "strategy", "observer pattern", "adapter", "facade",
+      "mvc", "mvvm", "clean architecture", "hexagonal",
+      "ddd", "domain driven", "cqrs", "event sourcing",
+      "performance", "optimization", "profiling", "benchmark",
+      "memory leak", "garbage collection", "gc",
+      "caching", "cache", "memoization",
+      "debugging", "debugger", "breakpoint",
+      "refactoring", "code smell", "technical debt",
+      "scalability", "high availability", "fault tolerance",
+      "cap theorem", "consistency", "partition tolerance"
+    ]
+  }
+}

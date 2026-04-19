@@ -1,0 +1,10 @@
+{
+  "name": "socratiskill",
+  "version": "0.0.1",
+  "description": "Adaptive socratic mentor for Claude Code — teaches you to code instead of coding for you. Port of SocraticCode (OpenCode fork) with 5 user levels, hint escalation, spaced repetition, Feynman mode, and per-turn pedagogical injection via hooks.",
+  "author": {
+    "name": "Victor Barrantes"
+  },
+  "homepage": "https://github.com/VicBa2000/socratiskill",
+  "license": "MIT"
+}

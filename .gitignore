@@ -1,0 +1,26 @@
+# Internal development docs (not shipped to users)
+CLAUDE.md
+cambios.txt
+socratiskill.txt
+
+# Local Claude Code state
+.claude/
+
+# Local user state from running the plugin during dev
+sessions/
+journal/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Archives
+*.rar
+*.zip
+*.tar.gz
+
+# Node / bun (only if a future build step adds them)
+node_modules/
+bun.lockb

@@ -1,0 +1,289 @@
+================================================================================
+  SOCRATISKILL - Quick Start + How to Use
+================================================================================
+
+  A Claude Code plugin that turns the CLI into a socratic mentor: asks
+  before answering, escalates hints on struggle, reviews past mistakes,
+  flags antipatterns, and keeps a learning journal.
+
+
+================================================================================
+  1. QUICK START (fresh install, 3 minutes)
+================================================================================
+
+  Prerequisites:
+    - bun        https://bun.com/docs/installation
+    - node       (any recent LTS; already bundled with most setups)
+    - Claude Code with plugin + hook support
+
+
+  ------------------------------------------------------------------
+  1.1 WHAT YOU CONFIGURE WHEN (read this first)
+  ------------------------------------------------------------------
+
+  Socratiskill installs at the USER level, not per project. Everything
+  in 1.2 below is done EXACTLY ONCE per machine.
+
+    [ONE-TIME]      Steps 1-4 in section 1.2.
+                    Hooks are written to ~/.claude/settings.json.
+                    State lives in ~/.claude/socratic/.
+                    These are global to your Claude Code installation.
+
+    [PER PROJECT]   Nothing. The mentor follows you across every
+                    project / working directory automatically. No
+                    per-repo setup, no .claude/ directory in your
+                    project, no environment variables.
+
+    [PER SESSION]   Nothing. Each new Claude Code console you launch
+                    picks up the hooks and the plugin automatically.
+                    You don't run `/plugin install` or anything else
+                    on session start.
+
+                    The only thing you may want to toggle per session
+                    is enable/disable, if you sometimes prefer vanilla
+                    Claude Code:
+                      /socratiskill:socratic off    -> mute mentor
+                      /socratiskill:socratic on     -> re-enable
+                    The flag is persisted, so "off" stays off across
+                    sessions until you turn it back on.
+
+
+  ------------------------------------------------------------------
+  1.2 ONE-TIME SETUP (run these once per machine)
+  ------------------------------------------------------------------
+
+  Step 1. Get the plugin files.
+    git clone https://github.com/VicBa2000/socratiskill ~/socratiskill
+
+  Step 2. Run the installer (seeds profile.json, registers hooks).
+    bash ~/socratiskill/scripts/install.sh
+
+  Step 3. Tell Claude Code where the plugin is (inside a Claude Code
+  session):
+    /plugin marketplace add ~/socratiskill
+    /plugin install socratiskill@socratiskill
+    /reload-plugins
+
+  Step 4. Calibrate your pedagogical level (one question):
+    /socratiskill:socratic calibrate
+    -> pick 1..5 (Novice / Basic / Intermediate / Advanced / Expert).
+
+  You are done. From now on, every Claude Code console you open in
+  any project responds as a socratic mentor adapted to your level.
+  Keep coding normally.
+
+
+================================================================================
+  2. HOW TO USE (daily cheatsheet)
+================================================================================
+
+  Everything is dispatched through /socratiskill:socratic <subcommand>.
+
+  ------------------------------------------------------------------
+  2.1 CHECK YOUR CURRENT STATE
+  ------------------------------------------------------------------
+    /socratiskill:socratic              -> status (same as below)
+    /socratiskill:socratic status       -> enabled, level, mode, streak
+
+    Reads: ~/.claude/socratic/profile.json
+
+  ------------------------------------------------------------------
+  2.2 TURN THE MENTOR ON / OFF
+  ------------------------------------------------------------------
+    /socratiskill:socratic off          -> disable the mentor (vanilla mode)
+    /socratiskill:socratic on           -> re-enable
+
+    Toggle is instant. Hooks stay installed but exit immediately when
+    disabled. Perfect for moments you just want a plain code assistant.
+
+  ------------------------------------------------------------------
+  2.3 CHANGE THE LEVEL / MODE
+  ------------------------------------------------------------------
+    /socratiskill:socratic level 3      -> set user level (1..5)
+    /socratiskill:socratic mode learn       -> prioritize teaching
+    /socratiskill:socratic mode productive  -> prioritize speed
+
+    Levels 1..5 in short:
+      1 Novice        Live teacher        — explains everything
+      2 Basic         Teacher with context — explains the why
+      3 Intermediate  Pair programmer      — asks before writing
+      4 Advanced      Code reviewer        — challenges decisions
+      5 Expert        Silent colleague     — only flags real issues
+
+  ------------------------------------------------------------------
+  2.4 ASK FOR MORE / LESS GUIDANCE DURING A CONVERSATION
+  ------------------------------------------------------------------
+    /socratiskill:socratic hint         -> raise scaffolding (+1)
+    /socratiskill:socratic faster       -> same as hint (alias, less filler)
+    /socratiskill:socratic slower       -> drop scaffolding (-2, more socratic)
+    /socratiskill:socratic challenge    -> next turn: anti-adulation mode
+
+    These adjust THIS session's hint level. The mentor's automatic
+    escalation (based on correct/wrong answers) continues in parallel.
+
+  ------------------------------------------------------------------
+  2.5 TEACH SOMETHING TO CLAUDE (Feynman mode)
+  ------------------------------------------------------------------
+    /socratiskill:socratic teach <topic>
+    ... (you explain; Claude probes with questions, doesn't teach) ...
+    /socratiskill:socratic endteach
+
+    Example:
+      /socratiskill:socratic teach closures
+      > "A closure is a function that remembers variables from the
+      > outer scope even after the outer function returned..."
+      Claude: "Walk me through an example where two closures share
+      the same outer variable but at different times?"
+      ... after 3-4 turns ...
+      /socratiskill:socratic endteach
+      -> "teach ended: closures (Nmin, K gaps detected)"
+
+    Gaps go to the session file and later to the daily journal.
+
+  ------------------------------------------------------------------
+  2.6 REVIEW PAST MISTAKES (spaced repetition, Leitner)
+  ------------------------------------------------------------------
+    /socratiskill:socratic review
+
+    If you have a card due (an old topic you failed), Claude poses one
+    verifiable question about it. Your answer updates the Leitner box
+    (1 -> 3 -> 7 -> 14 -> 30 days). Two consecutive right answers
+    advance the card; one wrong answer resets it.
+
+    If no cards are due:
+      "no review cards due"
+
+  ------------------------------------------------------------------
+  2.7 SEE WHAT YOU ACTUALLY LEARNED (journal)
+  ------------------------------------------------------------------
+    /socratiskill:socratic journal              -> daily (today)
+    /socratiskill:socratic journal week         -> ISO week (Mon-Sun)
+    /socratiskill:socratic journal month        -> calendar month
+
+    Generates a markdown rollup from your session files, categorizing
+    topics into Learned / Struggled / Practiced, plus any Feynman
+    teach summaries and a Leitner snapshot. Saved under
+    ~/.claude/socratic/journal/.
+
+  ------------------------------------------------------------------
+  2.8 ACCEPT A CALIBRATION SUGGESTION
+  ------------------------------------------------------------------
+    After 3+ correct or 3+ wrong answers in a 5-turn window, the
+    mentor suggests adjusting your level. When you see "calibration:
+    suggest level X -> Y" in context, run:
+
+    /socratiskill:socratic accept
+
+    This applies the change and resets the session's hint counters.
+
+
+================================================================================
+  3. TYPICAL WORKFLOWS
+================================================================================
+
+  ------------------------------------------------------------------
+  3.1 DAILY CODING (level 3 or 4, mode productive)
+  ------------------------------------------------------------------
+    Start: /socratiskill:socratic mode productive
+    Work normally. Claude asks before writing, flags issues, answers
+    without hand-holding.
+    End of day: /socratiskill:socratic journal
+    -> see what you practiced and where you struggled.
+
+  ------------------------------------------------------------------
+  3.2 LEARNING A NEW TOPIC (level 2 or 3, mode learn)
+  ------------------------------------------------------------------
+    Start: /socratiskill:socratic mode learn
+    Ask the topic. Claude explains with verification questions.
+    If it goes too fast: /socratiskill:socratic slower
+    If too slow:        /socratiskill:socratic faster
+    Once you think you get it:
+      /socratiskill:socratic teach <topic>
+      (explain it in your own words; Claude probes for gaps)
+      /socratiskill:socratic endteach
+
+  ------------------------------------------------------------------
+  3.3 WEEKLY REFRESHER
+  ------------------------------------------------------------------
+    Every few days:
+      /socratiskill:socratic review
+      (answer the card; Claude schedules the next review)
+    Once a week:
+      /socratiskill:socratic journal week
+      (see which topics resurfaced as "struggled")
+
+
+================================================================================
+  4. WHERE STATE LIVES
+================================================================================
+
+  ~/.claude/socratic/profile.json          your level, mode, enabled flag
+  ~/.claude/socratic/error-map.json        Leitner boxes per topic
+  ~/.claude/socratic/antipatterns.json     active antipatterns + counts
+  ~/.claude/socratic/sessions/<date>.json  one file per UTC day, telemetry
+  ~/.claude/socratic/journal/<file>.md     generated rollups
+
+
+================================================================================
+  5. TROUBLESHOOTING
+================================================================================
+
+  Problem: /socratiskill:socratic status shows "enabled: false".
+    Fix:   /socratiskill:socratic on
+
+  Problem: Subcommands behave weird after editing SKILL.md.
+    Fix:   /reload-plugins (Claude Code caches the SKILL.md body).
+           Scripts (*.ts, *.sh) are picked up on every call — no reload
+           needed for those.
+
+  Problem: "Welcome to Socratiskill" never shows up.
+    Fix:   You already calibrated. To redo:
+             /socratiskill:socratic calibrate force
+
+  Problem: "no review cards due" but you know you have struggled topics.
+    Fix:   Open ~/.claude/socratic/error-map.json. A card is due when
+           next_review_at <= now AND resolved == false. If everything
+           is upcoming, you just have to wait.
+
+  Problem: HINT_META block shows up as visible text in your client.
+    Cause: Your markdown renderer doesn't strip HTML comments.
+    Fix:   The block is harmless telemetry. Open an issue; we might
+           add an opt-in alternative format.
+
+  Problem: You want to start completely fresh.
+    Fix:   bash ~/socratiskill/scripts/uninstall.sh --purge
+           Then re-run install.sh.
+
+
+================================================================================
+  6. DISABLE / UNINSTALL
+================================================================================
+
+  Temporary pause:
+    /socratiskill:socratic off
+
+  Full uninstall:
+    bash ~/socratiskill/scripts/uninstall.sh
+    (asks interactively whether to keep your journal/profile; use
+    --keep-state or --purge to skip the prompt)
+
+    Then, inside Claude Code:
+    /plugin uninstall socratiskill
+
+  Hooks live in ~/.claude/settings.json under data.hooks.UserPromptSubmit
+  and data.hooks.Stop. The uninstaller removes ONLY the socratiskill
+  entries; other hooks you may have are preserved.
+
+
+================================================================================
+  7. DEEPER READING
+================================================================================
+
+  README.md           overview, architecture, limitations
+  MANUAL-TEST.md      step-by-step end-to-end test plan (5 scenarios)
+  tests/run-all.sh    synthetic test suite (18 scenarios, 42+ assertions)
+  CLAUDE.md           contributor-oriented technical notes
+
+================================================================================
+  END
+================================================================================

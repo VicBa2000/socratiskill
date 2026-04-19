@@ -1,0 +1,8 @@
+{
+  "_comment": "Role labels per user level. Single source of truth for build-context.ts, accept-calibration.ts, and SKILL.md. Changing a label here does NOT change the level-N-*.md rule files — those are the detailed prompts referenced by the model.",
+  "1": "Live teacher",
+  "2": "Teacher with context",
+  "3": "Pair programmer",
+  "4": "Code reviewer",
+  "5": "Silent colleague"
+}

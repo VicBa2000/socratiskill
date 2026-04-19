@@ -1,0 +1,19 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "socratiskill",
+  "description": "Socratiskill — adaptive socratic mentor plugin for Claude Code.",
+  "owner": {
+    "name": "Victor Barrantes"
+  },
+  "plugins": [
+    {
+      "name": "socratiskill",
+      "description": "Adaptive socratic mentor: 5 user levels, hint escalation, spaced repetition, Feynman mode, per-turn pedagogical injection via hooks.",
+      "author": {
+        "name": "Victor Barrantes"
+      },
+      "source": "./",
+      "category": "development"
+    }
+  ]
+}
