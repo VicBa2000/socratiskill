@@ -61,6 +61,20 @@ assert_safe_state_dir() {
     echo "[abort] SOCRATIC_STATE_DIR must contain '.claude/socratic' segment, got: $dir" >&2
     exit 2
   fi
+  # Reject ".." path segments. The string-level substring checks above
+  # accept "$HOME/.claude/socratic/../../../victim" because the literal
+  # substrings match — but rm -rf invokes the kernel, which canonicalizes
+  # ".." at syscall time and escapes the intended directory. We normalize
+  # backslashes to forward slashes (Windows env vars may use either) and
+  # anchor the string with leading/trailing "/" so the single pattern
+  # "/../" catches traversal at start, middle, and end (bare "..", "/..",
+  # "foo/..", "/a/b/../c").
+  local norm="/${dir}/"
+  norm="${norm//\\//}"
+  if [[ "$norm" == */../* ]]; then
+    echo "[abort] SOCRATIC_STATE_DIR contains '..' path segment: $dir" >&2
+    exit 2
+  fi
 }
 
 MODE=interactive

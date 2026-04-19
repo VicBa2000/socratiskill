@@ -190,6 +190,25 @@ if should_run 1; then
   else
     fail "SEC-1f happy path did not remove legit dir"
   fi
+
+  # 1g — path traversal via ".." segments.
+  # The earlier guards (absolute, under $HOME, contains .claude/socratic)
+  # operate on the literal string, so an attacker crafting
+  #   $HOME/.claude/socratic/../../../victim
+  # passes all three — yet rm -rf resolves ".." at the syscall level and
+  # escapes the intended directory. This test proves the dedicated
+  # traversal guard is engaged.
+  mkdir -p "$FAKE_HOME/.claude/socratic"
+  TRAVERSAL="$FAKE_HOME/.claude/socratic/../../../sec1-victim"
+  # Fresh victim file for this sub-test (1c may have removed the dir).
+  mkdir -p "$VICTIM"
+  echo "do not delete via traversal" > "$VICTIM/traversal-bait.txt"
+  OUT=$(run_uninstall "$TRAVERSAL" 2>&1 || true)
+  if [[ "$OUT" == *".."* || "$OUT" == *"traversal"* || "$OUT" == *"abort"* ]] && [[ -f "$VICTIM/traversal-bait.txt" ]]; then
+    pass "refuses '..' traversal (bait intact)"
+  else
+    fail "SEC-1g traversal bypass (out=$OUT bait=$( [[ -f "$VICTIM/traversal-bait.txt" ]] && echo present || echo GONE ))"
+  fi
 fi
 
 # ===========================================================================
