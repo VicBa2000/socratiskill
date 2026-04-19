@@ -97,14 +97,30 @@ export namespace Antipatterns {
     return out
   }
 
+  // Guards against ReDoS on hostile or overly-complex inputs.
+  //
+  //   - MAX_REGEX_LEN and MAX_FLAGS_LEN bound the pattern coming from the
+  //     bundled antipatterns.json. The file is in-repo and we control it,
+  //     but a malicious PR or a local edit should not be able to wedge the
+  //     hook with a catastrophic-backtracking pattern.
+  //   - MAX_CODE_LEN truncates the text being scanned. A 10MB agent reply
+  //     is already a problem; we cap scanning at 100KB to keep per-turn
+  //     latency bounded regardless of the regex shape.
+  const MAX_REGEX_LEN = 1000
+  const MAX_FLAGS_LEN = 10
+  const MAX_CODE_LEN = 100_000
+
   /** Count matches of each antipattern regex in `code`. */
   export function scanText(code: string, defs: Definition[]): Record<string, number> {
     const result: Record<string, number> = {}
     if (!code) return result
+    const bounded = code.length > MAX_CODE_LEN ? code.slice(0, MAX_CODE_LEN) : code
     for (const d of defs) {
+      if (typeof d.regex !== "string" || d.regex.length === 0 || d.regex.length > MAX_REGEX_LEN) continue
+      if (d.flags && (typeof d.flags !== "string" || d.flags.length > MAX_FLAGS_LEN)) continue
       try {
         const re = new RegExp(d.regex, d.flags || "g")
-        const matches = code.match(re)
+        const matches = bounded.match(re)
         if (matches && matches.length > 0) result[d.id] = matches.length
       } catch {
         // malformed regex — skip

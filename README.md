@@ -128,12 +128,26 @@ journal/                      daily/weekly/monthly markdown rollups
   with Opus 4.7, but not guaranteed).
 - **Initial calibration is a self-assessment**, not diagnostic. A
   version with 5 scoreable technical questions is future work.
-- **Session files are per-UTC-day**, not per-Claude-Code-session. If
-  you open 2 parallel sessions on the same day, both write to the
-  same file (no locking — theoretical race condition, not observed).
+- **Session files are per-UTC-day**, not per-Claude-Code-session. Two
+  parallel sessions on the same day share the same file, but writes
+  are atomic (`renameSync`) and `profile.json` read-modify-write is
+  serialized with an `O_EXCL` lock, so you will not lose data.
 - **HINT_META as HTML comment** assumes the markdown renderer strips
   comments. Works in the Claude Code TUI; if it shows up visible in
   another client, open an issue.
+
+### Privacy
+
+All socratic state is stored locally under `~/.claude/socratic/`. The
+hook stdout that is injected into the model context on every turn
+contains your current level, mode, detected signals, active
+antipatterns, and the titles of review-due topics. If you pipe hook
+output to a shared log or run Claude Code with verbose logging, that
+information is exposed there — review your log destinations before
+sharing them. Turn records (`sessions/<date>.json`) store 200-char
+excerpts of your prompt and the model reply; avoid pasting secrets
+(API keys, proprietary code) into prompts if you are uncomfortable
+with that residue.
 
 ---
 

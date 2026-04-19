@@ -32,7 +32,9 @@ PRE_CMD="bash ${SCRIPT_DIR}/hook-pre-prompt.sh"
 POST_CMD="bash ${SCRIPT_DIR}/hook-post-turn.sh"
 
 mkdir -p "$(dirname "$SETTINGS_PATH")"
-[[ -f "$SETTINGS_PATH" ]] || echo '{}' > "$SETTINGS_PATH"
+# Missing-file creation is handled inside the node step below via try/catch
+# on readFileSync. This avoids a race where two concurrent installs both
+# pre-create "{}" and both then write full settings non-atomically.
 
 SOCRATIC_RE='socratiskill.*hook-(pre-prompt|post-turn)(-test)?\.sh'
 
@@ -40,9 +42,10 @@ export SETTINGS_PATH PRE_CMD POST_CMD SOCRATIC_RE DRY_RUN
 
 node -e '
   const fs = require("fs");
-  const path = process.env.SETTINGS_PATH;
+  const path = require("path");
+  const settingsPath = process.env.SETTINGS_PATH;
   let data = {};
-  try { data = JSON.parse(fs.readFileSync(path, "utf-8")); } catch (e) { data = {}; }
+  try { data = JSON.parse(fs.readFileSync(settingsPath, "utf-8")); } catch (e) { data = {}; }
   if (!data || typeof data !== "object") data = {};
   if (!data.hooks || typeof data.hooks !== "object") data.hooks = {};
 
@@ -73,8 +76,18 @@ node -e '
   if (process.env.DRY_RUN === "1") {
     process.stdout.write(out);
   } else {
-    fs.writeFileSync(path, out);
-    process.stdout.write("installed: " + path + "\n");
+    // Atomic write: stage in the same directory, then rename. Same-volume
+    // renames are atomic on POSIX and on Windows, so a concurrent reader
+    // either sees the old or the new file — never a half-written one.
+    const tmp = settingsPath + ".tmp-" + process.pid + "-" + Date.now();
+    try {
+      fs.writeFileSync(tmp, out);
+      fs.renameSync(tmp, settingsPath);
+    } catch (e) {
+      try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch (_) {}
+      throw e;
+    }
+    process.stdout.write("installed: " + settingsPath + "\n");
     process.stdout.write("  UserPromptSubmit -> " + process.env.PRE_CMD + "\n");
     process.stdout.write("  Stop             -> " + process.env.POST_CMD + "\n");
   }

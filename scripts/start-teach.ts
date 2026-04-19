@@ -63,6 +63,21 @@ function parseArgs(argv: string[]): { topic: string } {
     process.stderr.write("usage: start-teach --topic <topic>\n")
     process.exit(2)
   }
+  // Reject whitespace-only and punctuation-only inputs before normalizing.
+  // Otherwise "---" and "   " both collapse to "" with the same generic
+  // "must produce alphanumeric slug" message, which does not tell the
+  // user what was actually wrong with their input.
+  const trimmed = rawTopic.trim()
+  if (!trimmed) {
+    process.stderr.write("invalid topic: empty or whitespace only\n")
+    process.exit(2)
+  }
+  if (!/[a-zA-Z0-9]/.test(trimmed)) {
+    process.stderr.write(
+      `invalid topic: ${JSON.stringify(rawTopic)} has no alphanumeric characters — try something like "closures" or "event-loop"\n`,
+    )
+    process.exit(2)
+  }
   const normalized = normalizeTopic(rawTopic)
   if (!normalized) {
     process.stderr.write(`invalid topic: ${JSON.stringify(rawTopic)} (must produce alphanumeric slug)\n`)

@@ -63,9 +63,22 @@ summary() {
 }
 
 # --- test isolation -------------------------------------------------------
+# Root for every test's scratch state. `mktemp` avoids the old hardcoded
+# "C:/temp/skstate" and cross-run collisions, but on Git Bash for Windows
+# its output is a POSIX-style path like "/tmp/xxx" that native Windows
+# binaries (bun, node when we spawn them) cannot resolve when they see
+# it embedded as a literal in stdin/JSON — only env vars get the
+# translation. So we normalize to a mixed Windows path via cygpath when
+# available; on macOS/Linux the mktemp path is already fine.
+TEST_ROOT="$(mktemp -d -t sktest.XXXXXXXX)"
+if command -v cygpath >/dev/null 2>&1; then
+  TEST_ROOT="$(cygpath -m "$TEST_ROOT")"
+fi
+trap 'rm -rf "$TEST_ROOT" 2>/dev/null || true' EXIT
+
 setup_state() {
   local id="$1"
-  local tmp="C:/temp/skstate/tests-${id}-$$"
+  local tmp="${TEST_ROOT}/state-${id}"
   mkdir -p "$tmp/sessions"
   cat > "$tmp/profile.json" <<'EOF'
 {
