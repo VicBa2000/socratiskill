@@ -15,6 +15,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs"
 import { homedir } from "node:os"
 import { join, dirname } from "node:path"
+import { StateIO } from "./state-io"
 
 interface FeynmanState {
   topic: string
@@ -113,7 +114,7 @@ function main(): void {
   }
 
   ensureDir(dirname(sessionPath))
-  writeFileSync(sessionPath, JSON.stringify(doc, null, 2))
+  StateIO.writeJsonAtomic(sessionPath, doc)
   process.stdout.write(`teach mode on: ${topic}\n`)
   process.stdout.write(`your next turn: YOU explain ${topic}. i will probe for gaps, not teach.\n`)
   process.stdout.write(`to end: /socratiskill:socratic endteach\n`)

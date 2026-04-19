@@ -14,10 +14,11 @@
  *   5. Prints a single confirmation line.
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs"
+import { readFileSync, existsSync, mkdirSync } from "node:fs"
 import { homedir } from "node:os"
 import { join, dirname } from "node:path"
 import { HintState } from "./hint-state"
+import { StateIO } from "./state-io"
 import ROLES_JSON from "../data/roles.json"
 
 const ROLES: Record<number, string> = (() => {
@@ -53,26 +54,33 @@ function readJson<T>(path: string, fallback: T): T {
 
 function writeJson(path: string, data: unknown): void {
   ensureDir(dirname(path))
-  writeFileSync(path, JSON.stringify(data, null, 2))
+  StateIO.writeJsonAtomic(path, data)
 }
 
 function main(): void {
   const profilePath = join(stateDir(), "profile.json")
-  const profile = readJson<Record<string, unknown>>(profilePath, {})
-  const pending = profile["pending_calibration_change"] as
-    | { direction: "up" | "down"; from: number; to: number; reason: string }
-    | undefined
+  type Pending = { direction: "up" | "down"; from: number; to: number; reason: string }
+  let pending: Pending | undefined
+  let newLevel = 3
+
+  // Hold the profile lock across the entire RMW so a hook turn cannot
+  // overwrite global_level while we are applying the calibration.
+  StateIO.withLock(`${profilePath}.lock`, () => {
+    const profile = readJson<Record<string, unknown>>(profilePath, {})
+    pending = profile["pending_calibration_change"] as Pending | undefined
+    if (!pending) return
+    newLevel = HintState.clampUserLevel(Number(pending.to))
+    profile["global_level"] = newLevel
+    delete profile["pending_calibration_change"]
+    writeJson(profilePath, profile)
+  })
+
   if (!pending) {
     process.stderr.write("error: no pending calibration change\n")
     process.exit(2)
   }
 
-  const newLevel = HintState.clampUserLevel(Number(pending.to))
   const role = ROLES[newLevel] ?? "Pair programmer"
-
-  profile["global_level"] = newLevel
-  delete profile["pending_calibration_change"]
-  writeJson(profilePath, profile)
 
   const sessPath = join(stateDir(), "sessions", `${todayIso()}.json`)
   type SessionDoc = {

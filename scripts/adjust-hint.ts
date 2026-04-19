@@ -14,10 +14,11 @@
  * summary. Fail-fast (non-zero exit) so the caller can show stderr.
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs"
+import { readFileSync, existsSync, mkdirSync } from "node:fs"
 import { homedir } from "node:os"
 import { join, dirname } from "node:path"
 import { HintState } from "./hint-state"
+import { StateIO } from "./state-io"
 
 interface Args {
   delta?: number
@@ -63,7 +64,7 @@ function readJson<T>(path: string, fallback: T): T {
 
 function writeJson(path: string, data: unknown): void {
   ensureDir(dirname(path))
-  writeFileSync(path, JSON.stringify(data, null, 2))
+  StateIO.writeJsonAtomic(path, data)
 }
 
 function loadProfileLevel(): number {

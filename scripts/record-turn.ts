@@ -19,12 +19,13 @@
  *   5. Fail-open: cualquier excepcion termina con exit 0 sin efectos.
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs"
+import { readFileSync, existsSync, mkdirSync } from "node:fs"
 import { homedir } from "node:os"
 import { join, dirname } from "node:path"
 import { HintState } from "./hint-state"
 import { Detector } from "./detector"
 import { Antipatterns } from "./antipatterns"
+import { StateIO } from "./state-io"
 import ALGORITHM_JSON from "../data/algorithm.json"
 
 interface HookInput {
@@ -132,7 +133,7 @@ function readJson<T>(path: string, fallback: T): T {
 
 function writeJson(path: string, data: unknown): void {
   ensureDir(dirname(path))
-  writeFileSync(path, JSON.stringify(data, null, 2))
+  StateIO.writeJsonAtomic(path, data)
 }
 
 function todayIso(): string {
@@ -211,11 +212,11 @@ function extractHintMeta(agentText: string): HintMeta | null {
   const match = commentMatch ?? bracketMatch
   if (!match) return null
   const body = match[1]!.trim()
-  try {
-    return JSON.parse(body) as HintMeta
-  } catch {
-    return null
-  }
+  // Validate that the parsed JSON is at least shaped like HintMeta (has
+  // one recognizable field). This rejects both malformed JSON and
+  // shape-wrong payloads that would otherwise propagate `undefined`
+  // fields into turn records and the calibration pipeline.
+  return StateIO.parseJson<HintMeta | null>(body, StateIO.isHintMeta as StateIO.Guard<HintMeta>, null)
 }
 
 function loadProfile(): { level: number; mode: string } {
@@ -389,11 +390,16 @@ function main(): void {
   Antipatterns.recordTurn(userText, agentText, new Date())
 
   const profilePath = join(stateDir(), "profile.json")
-  const profile = readJson<Record<string, unknown>>(profilePath, {})
-  profile["last_active"] = new Date().toISOString()
-  profile["last_user_message_length"] = userText.length
-  if (pending) profile["pending_calibration_change"] = pending
-  writeJson(profilePath, profile)
+  // Serialize profile read-modify-write against build-context (clears
+  // challenge_next_turn) and accept-calibration (applies level change).
+  // Without the lock, concurrent hooks lose each other's writes.
+  StateIO.withLock(`${profilePath}.lock`, () => {
+    const profile = readJson<Record<string, unknown>>(profilePath, {})
+    profile["last_active"] = new Date().toISOString()
+    profile["last_user_message_length"] = userText.length
+    if (pending) profile["pending_calibration_change"] = pending
+    writeJson(profilePath, profile)
+  })
 }
 
 if (process.env["SOCRATIC_DEBUG"]) {

@@ -21,9 +21,10 @@ import { Detector } from "./detector"
 import { Taxonomy } from "./taxonomy"
 import { HintState } from "./hint-state"
 import { Antipatterns } from "./antipatterns"
-import { readFileSync, writeFileSync, existsSync } from "node:fs"
+import { readFileSync, existsSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
+import { StateIO } from "./state-io"
 import ROLES_JSON from "../data/roles.json"
 
 interface HookInput {
@@ -225,10 +226,19 @@ function main(): void {
   if (profile.challenge_next_turn) {
     lines.push("challenge: ACTIVE for this turn")
     lines.push("note: anti-adulation mode — refuse flattery, demand precise answers, reject vague reasoning, do NOT hedge. One turn only.")
-    const cleared: Record<string, unknown> = { ...(profile as unknown as Record<string, unknown>) }
-    delete cleared["challenge_next_turn"]
+    // RMW the profile under a lock to avoid racing record-turn's
+    // write at the end of the turn. Re-read inside the lock so we
+    // don't clobber last_active / pending_calibration_change set
+    // by a concurrent hook.
+    const profilePath = join(stateDir(), "profile.json")
     try {
-      writeFileSync(join(stateDir(), "profile.json"), JSON.stringify(cleared, null, 2))
+      StateIO.withLock(`${profilePath}.lock`, () => {
+        const fresh = existsSync(profilePath)
+          ? (JSON.parse(readFileSync(profilePath, "utf-8")) as Record<string, unknown>)
+          : ({} as Record<string, unknown>)
+        delete fresh["challenge_next_turn"]
+        StateIO.writeJsonAtomic(profilePath, fresh)
+      })
     } catch {
       // fail-open: leave flag set, next turn will consume it
     }

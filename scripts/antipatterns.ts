@@ -16,9 +16,10 @@
  * activo). Overridable via campos del JSON de definitions.
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs"
+import { readFileSync, existsSync, mkdirSync } from "node:fs"
 import { homedir } from "node:os"
 import { join, dirname } from "node:path"
+import { StateIO } from "./state-io"
 import DEFS_JSON from "../data/antipatterns.json"
 
 export namespace Antipatterns {
@@ -81,7 +82,7 @@ export namespace Antipatterns {
   export function writeState(state: State): void {
     const p = statePath()
     if (!existsSync(dirname(p))) mkdirSync(dirname(p), { recursive: true })
-    writeFileSync(p, JSON.stringify(state, null, 2))
+    StateIO.writeJsonAtomic(p, state)
   }
 
   /** Extract contents of fenced code blocks. Returns array of code-only strings. */

@@ -14,6 +14,7 @@
  */
 
 import { readFileSync, writeFileSync, existsSync } from "node:fs"
+import { StateIO } from "./state-io"
 import { homedir } from "node:os"
 import { join } from "node:path"
 
@@ -97,7 +98,7 @@ function main(): void {
   doc.feynman_summaries.push(summary)
   delete doc.feynman
 
-  writeFileSync(sessionPath, JSON.stringify(doc, null, 2))
+  StateIO.writeJsonAtomic(sessionPath, doc)
 
   process.stdout.write(
     `teach ended: ${summary.topic} (${summary.duration_minutes}min, ${summary.gap_count} gaps)\n`,
