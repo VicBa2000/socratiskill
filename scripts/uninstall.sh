@@ -26,6 +26,36 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 SETTINGS_PATH="${CLAUDE_SETTINGS:-$HOME/.claude/settings.json}"
 STATE_DIR="${SOCRATIC_STATE_DIR:-$HOME/.claude/socratic}"
 
+# Guard: refuse to rm -rf anything that isn't clearly our state dir.
+# Must be absolute, under $HOME, contain ".claude/socratic", and not be
+# $HOME itself nor a root-level path. Rejection is fatal — better to
+# abort than risk deleting the wrong tree.
+assert_safe_state_dir() {
+  local dir="$1"
+  if [[ -z "$dir" ]]; then
+    echo "[abort] SOCRATIC_STATE_DIR is empty — refusing to run rm -rf on empty path." >&2
+    exit 2
+  fi
+  if [[ "$dir" != /* ]]; then
+    echo "[abort] SOCRATIC_STATE_DIR must be an absolute path, got: $dir" >&2
+    exit 2
+  fi
+  case "$dir" in
+    /|/root|/home|/Users|/tmp|"$HOME"|"$HOME/")
+      echo "[abort] refusing to rm -rf a root-level / home path: $dir" >&2
+      exit 2
+      ;;
+  esac
+  if [[ "$dir" != "$HOME"/* ]]; then
+    echo "[abort] SOCRATIC_STATE_DIR must live under \$HOME ($HOME), got: $dir" >&2
+    exit 2
+  fi
+  if [[ "$dir" != *".claude/socratic"* ]]; then
+    echo "[abort] SOCRATIC_STATE_DIR must contain '.claude/socratic' segment, got: $dir" >&2
+    exit 2
+  fi
+}
+
 MODE=interactive
 DRY_RUN=0
 for arg in "$@"; do
@@ -94,7 +124,8 @@ if [[ -d "$STATE_DIR" ]]; then
       if [[ "$DRY_RUN" == "1" ]]; then
         echo "[dry-run] would remove $STATE_DIR"
       else
-        rm -rf "$STATE_DIR"
+        assert_safe_state_dir "$STATE_DIR"
+        rm -rf -- "$STATE_DIR"
         echo "[ok] removed $STATE_DIR"
       fi
       ;;
@@ -105,7 +136,8 @@ if [[ -d "$STATE_DIR" ]]; then
         printf 'Remove user state at %s? (profile, journal, error-map, sessions) [y/N] ' "$STATE_DIR"
         read -r ans || ans=""
         if [[ "$ans" == "y" || "$ans" == "Y" ]]; then
-          rm -rf "$STATE_DIR"
+          assert_safe_state_dir "$STATE_DIR"
+          rm -rf -- "$STATE_DIR"
           echo "[ok] removed $STATE_DIR"
         else
           echo "[keep] preserving $STATE_DIR"

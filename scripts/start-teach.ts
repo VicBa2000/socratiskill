@@ -74,12 +74,29 @@ function ensureDir(p: string): void {
   if (!existsSync(p)) mkdirSync(p, { recursive: true })
 }
 
+function readSessionDoc(path: string): SessionDoc {
+  if (!existsSync(path)) return { date: todayIso(), turns: [] }
+  try {
+    return JSON.parse(readFileSync(path, "utf-8")) as SessionDoc
+  } catch {
+    // Corrupted session file — preserve the bad copy for forensics and
+    // start fresh so the user can activate teach mode without manual
+    // intervention.
+    try {
+      const backup = `${path}.corrupt-${Date.now()}`
+      writeFileSync(backup, readFileSync(path))
+      process.stderr.write(`[warn] session file was corrupted — backed up to ${backup}\n`)
+    } catch {
+      // ignore backup failures (disk full, permissions) — still start fresh
+    }
+    return { date: todayIso(), turns: [] }
+  }
+}
+
 function main(): void {
   const { topic } = parseArgs(process.argv.slice(2))
   const sessionPath = join(stateDir(), "sessions", `${todayIso()}.json`)
-  const doc: SessionDoc = existsSync(sessionPath)
-    ? (JSON.parse(readFileSync(sessionPath, "utf-8")) as SessionDoc)
-    : { date: todayIso(), turns: [] }
+  const doc: SessionDoc = readSessionDoc(sessionPath)
 
   if (doc.feynman) {
     process.stderr.write(

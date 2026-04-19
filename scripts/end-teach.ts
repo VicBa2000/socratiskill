@@ -53,7 +53,25 @@ function main(): void {
     process.stderr.write("no teach session active\n")
     process.exit(2)
   }
-  const doc = JSON.parse(readFileSync(sessionPath, "utf-8")) as SessionDoc
+  let doc: SessionDoc
+  try {
+    doc = JSON.parse(readFileSync(sessionPath, "utf-8")) as SessionDoc
+  } catch {
+    // Corrupted session file. We can't safely end the teach mode without
+    // losing turns written after the corruption point. Back up and abort
+    // so the user decides how to recover.
+    const backup = `${sessionPath}.corrupt-${Date.now()}`
+    try {
+      writeFileSync(backup, readFileSync(sessionPath))
+    } catch {
+      // ignore — still report the original failure
+    }
+    process.stderr.write(
+      `session file corrupted: ${sessionPath}\n` +
+        `backed up to ${backup}. inspect or delete it, then try again.\n`,
+    )
+    process.exit(2)
+  }
   if (!doc.feynman) {
     process.stderr.write("no teach session active\n")
     process.exit(2)
