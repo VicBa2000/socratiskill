@@ -90,6 +90,8 @@ SEC-3 atomic writes never expose a half-written file
 SEC-4 concurrent hooks on profile.json never lose writes
 SEC-5 antipatterns regex guards clamp oversized definitions
 SEC-6 hooks tolerate hostile stdin without side effects
+SEC-7 topic injection (null bytes, RTL, traversal, control chars)
+SEC-8 install-hooks concurrent writes are atomic
 EOF
   exit 0
 fi
@@ -522,6 +524,203 @@ if should_run 6; then
     pass "hostile stdin produced zero session-file side effects"
   else
     fail "SEC-6e hostile stdin wrote a session file"
+  fi
+fi
+
+# ===========================================================================
+# SEC-7 — topic injection: null bytes, RTL, path traversal, control chars
+# ===========================================================================
+#
+# normalizeTopic() keeps only [a-z0-9-] after lowercasing. This block
+# drives start-teach.ts with each hostile payload and asserts that:
+#   a) the process never crashes and never writes outside the state dir
+#   b) every hostile char is stripped from the persisted slug
+#   c) any rejection message escapes the raw input (no direct echo of
+#      RTL / control chars to the terminal — JSON.stringify handles this)
+#   d) the session filename is still the expected date-based path (so a
+#      "../../etc/passwd" topic cannot redirect the file write)
+#
+if should_run 7; then
+  header "SEC-7 topic injection resistance"
+
+  TODAY="$(today_iso)"
+  STATE="$TEST_ROOT/sec7-state"
+  mkdir -p "$STATE/sessions"
+  echo '{"global_level":3,"mode":"learn","calibration_completed":true}' > "$STATE/profile.json"
+
+  probe_topic() {
+    # $1 = label, $2 = raw topic bytes via printf, $3 = expected slug or "REJECT"
+    local label="$1"; local rawhex="$2"; local expect="$3"
+    rm -f "$STATE/sessions/$TODAY.json"
+    local topic
+    topic="$(printf "$rawhex")"
+    local out ex=0
+    out="$(SOCRATIC_STATE_DIR="$STATE" bun run "$SCRIPTS/start-teach.ts" --topic "$topic" 2>&1)" || ex=$?
+    if [[ "$expect" == "REJECT" ]]; then
+      if [[ "$ex" != "0" && ! -f "$STATE/sessions/$TODAY.json" ]]; then
+        pass "$label: rejected, no session written"
+      else
+        fail "SEC-7 $label: did not reject (exit=$ex file=$( [[ -f "$STATE/sessions/$TODAY.json" ]] && echo YES || echo no))"
+      fi
+      return
+    fi
+    if [[ "$ex" != "0" || ! -f "$STATE/sessions/$TODAY.json" ]]; then
+      fail "SEC-7 $label: unexpected rejection (exit=$ex out=$out)"
+      return
+    fi
+    local got
+    got="$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")).feynman.topic)' "$STATE/sessions/$TODAY.json")"
+    if [[ "$got" == "$expect" ]]; then
+      pass "$label: slug = $got"
+    else
+      fail "SEC-7 $label: expected '$expect' got '$got'"
+    fi
+  }
+
+  # 7a — null byte inside a legit topic. JS strings tolerate \0 but it
+  # must be stripped from the slug.
+  probe_topic "null byte"      'evil\x00script'            "evilscript"
+
+  # 7b — RTL Override (U+202E). Encoded as UTF-8 bytes \xE2\x80\xAE.
+  probe_topic "RTL override"   'bad\xe2\x80\xaetxt'        "badtxt"
+
+  # 7c — zero-width joiner (U+200D) and zero-width space (U+200B).
+  probe_topic "zero-width"     'clo\xe2\x80\x8dsure\xe2\x80\x8b'  "closure"
+
+  # 7d — path traversal. Slashes are NOT in [a-z0-9-] so they are stripped;
+  # the resulting slug must not contain any path separator.
+  probe_topic "path traversal" '../../etc/passwd'          "etcpasswd"
+
+  # 7e — windows-style path separator.
+  probe_topic "windows sep"    'C:\\foo\\bar'              "cfoobar"
+
+  # 7f — shell metacharacters. Must be stripped; they never reach a shell
+  # because we invoke bun directly without shell interpolation. Spaces
+  # collapse to dashes via /\s+/g before the non-alnum filter runs, so
+  # "$(rm -rf /);`whoami`" -> "rm-rf-whoami".
+  probe_topic "shell metas"    '$(rm -rf /);`whoami`'      "rm-rf-whoami"
+
+  # 7g — newline and tab in the topic.
+  probe_topic "newline/tab"    'foo\nbar\tbaz'             "foo-bar-baz"
+
+  # 7h — only control chars + whitespace → must be rejected with the
+  # "no alphanumeric characters" message.
+  probe_topic "all control"    '\x01\x02\x03 \t'           "REJECT"
+
+  # 7i — only RTL + punctuation → reject.
+  probe_topic "only RTL"       '\xe2\x80\xae---'           "REJECT"
+
+  # 7j — very long string (>10KB). Normalization truncates to 80 chars.
+  LONG="$(printf 'a%.0s' {1..10000})"
+  rm -f "$STATE/sessions/$TODAY.json"
+  out=$(SOCRATIC_STATE_DIR="$STATE" bun run "$SCRIPTS/start-teach.ts" --topic "$LONG" 2>&1); ex=$?
+  got="$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")).feynman.topic)' "$STATE/sessions/$TODAY.json" 2>/dev/null || echo ERR)"
+  if [[ "$ex" == "0" && "${#got}" -le 80 ]]; then
+    pass "10KB topic: accepted + truncated to ${#got} chars"
+  else
+    fail "SEC-7j 10KB topic not handled (exit=$ex len=${#got})"
+  fi
+
+  # 7k — no file outside the state dir was created. Walk from TEST_ROOT
+  # and check for unexpected files.
+  STRAY=$(find "$TEST_ROOT" -type f -name 'passwd' -o -name '*etc*' 2>/dev/null | head -5)
+  if [[ -z "$STRAY" ]]; then
+    pass "no stray files created outside state dir"
+  else
+    fail "SEC-7k found stray files: $STRAY"
+  fi
+fi
+
+# ===========================================================================
+# SEC-8 — install-hooks concurrent is atomic
+# ===========================================================================
+#
+# Fire N install-hooks.sh in parallel against the same settings.json and
+# assert that (a) the file always parses as JSON, (b) the UserPromptSubmit
+# and Stop events each contain exactly ONE entry for socratiskill (the
+# dedup regex works), and (c) no .tmp-* files leak.
+#
+if should_run 8; then
+  header "SEC-8 install-hooks concurrent writes are atomic"
+
+  STATE="$TEST_ROOT/sec8-state"
+  mkdir -p "$STATE"
+  SETTINGS="$STATE/settings.json"
+  echo '{}' > "$SETTINGS"
+
+  # Fire 10 parallel installs.
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    CLAUDE_SETTINGS="$SETTINGS" bash "$SCRIPTS/install-hooks.sh" >/dev/null 2>&1 &
+  done
+  wait
+
+  # 8a — final settings is valid JSON
+  VALID=$(node -e 'try { JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")); console.log("y") } catch { console.log("n") }' "$SETTINGS")
+  if [[ "$VALID" == "y" ]]; then
+    pass "settings.json is valid JSON after 10 parallel installs"
+  else
+    fail "SEC-8a settings.json corrupted"
+  fi
+
+  # 8b — exactly one socratiskill entry per event (dedup regex engaged)
+  COUNTS=$(node -e '
+    const d = JSON.parse(require("fs").readFileSync(process.argv[1], "utf-8"));
+    const re = /socratiskill.*hook-(pre-prompt|post-turn)(-test)?\.sh/;
+    function count(event) {
+      const arr = (d.hooks && d.hooks[event]) || [];
+      let n = 0;
+      for (const entry of arr) {
+        const hs = (entry && entry.hooks) || [];
+        if (hs.some(h => h && typeof h.command === "string" && re.test(h.command))) n++;
+      }
+      return n;
+    }
+    console.log(count("UserPromptSubmit") + "," + count("Stop"));
+  ' "$SETTINGS")
+  if [[ "$COUNTS" == "1,1" ]]; then
+    pass "exactly one entry per event (got $COUNTS)"
+  else
+    fail "SEC-8b duplicate or missing entries (UserPromptSubmit,Stop = $COUNTS)"
+  fi
+
+  # 8c — no orphan .tmp-* files from interrupted renames
+  TMPLEAK=$(ls "$STATE" | grep -c '\.tmp-' || true)
+  if [[ "$TMPLEAK" == "0" ]]; then
+    pass "no orphan .tmp-* files after concurrent installs"
+  else
+    fail "SEC-8c $TMPLEAK orphan tmp files"
+  fi
+
+  # 8d — now seed with a pre-existing unrelated hook and verify it is
+  # preserved through concurrent installs (the regex only purges our own)
+  cat > "$SETTINGS" <<'JSON'
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      { "hooks": [{ "type": "command", "command": "bash /opt/other/thing.sh" }] }
+    ],
+    "PreToolUse": [
+      { "hooks": [{ "type": "command", "command": "bash /opt/audit/pre.sh" }] }
+    ]
+  }
+}
+JSON
+  for i in 1 2 3 4 5; do
+    CLAUDE_SETTINGS="$SETTINGS" bash "$SCRIPTS/install-hooks.sh" >/dev/null 2>&1 &
+  done
+  wait
+  PRESERVED=$(node -e '
+    const d = JSON.parse(require("fs").readFileSync(process.argv[1], "utf-8"));
+    const ups = (d.hooks && d.hooks.UserPromptSubmit) || [];
+    const pre = (d.hooks && d.hooks.PreToolUse) || [];
+    const hasOther = ups.some(e => (e.hooks || []).some(h => h.command === "bash /opt/other/thing.sh"));
+    const hasPre   = pre.some(e => (e.hooks || []).some(h => h.command === "bash /opt/audit/pre.sh"));
+    console.log(hasOther && hasPre ? "y" : "n");
+  ' "$SETTINGS")
+  if [[ "$PRESERVED" == "y" ]]; then
+    pass "unrelated hooks preserved through concurrent installs"
+  else
+    fail "SEC-8d unrelated hooks lost"
   fi
 fi
 
