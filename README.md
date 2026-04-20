@@ -309,7 +309,7 @@ Two complementary suites — together cover the pedagogical flow AND the
 threat model.
 
 ```bash
-bash tests/run-all.sh         # 21 scenarios, 64 assertions (functional)
+bash tests/run-all.sh         # 22 scenarios, 69 assertions (functional)
 bash tests/run-security.sh    #  8 scenarios, 40 assertions (adversarial)
 # flags for both: --only <N>, --stop-on-fail, --list
 ```
@@ -330,7 +330,7 @@ write under interruption, concurrent RMW on `profile.json`,
 antipattern regex bounds, hostile stdin to the hooks, and topic
 injection (null bytes, RTL unicode, shell metacharacters).
 
-Combined: **104 assertions, all green** as of v0.2.
+Combined: **109 assertions, all green** as of v0.2.
 
 For a manual end-to-end in a live Claude Code session, see
 [MANUAL-TEST.md](./MANUAL-TEST.md).
@@ -363,7 +363,7 @@ scripts/
 data/                  domains, prerequisites, technical terms, antipatterns,
                        roles, algorithm constants
 tests/
-  run-all.sh           21 scenarios, 64 assertions (functional)
+  run-all.sh           22 scenarios, 69 assertions (functional)
   run-security.sh      8 scenarios, 40 assertions (adversarial)
 ```
 

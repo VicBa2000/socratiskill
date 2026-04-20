@@ -486,6 +486,46 @@ if should_run 19; then
   teardown_state "$tmp"
 fi
 
+## S22 init-profile refuses to create default while paused
+if should_run 22; then
+  header "S22 init-profile refuses when .paused exists"
+
+  # 22a — paused state: profile.json absent, profile.json.paused present
+  tmp=$(setup_state 22)
+  mv "$tmp/profile.json" "$tmp/profile.json.paused"
+  set +e
+  OUT=$(SOCRATIC_STATE_DIR="$tmp" bash "$SCRIPTS/init-profile.sh" 2>&1); EX=$?
+  set -e
+  if [[ "$EX" == "3" ]] && echo "$OUT" | grep -q "plugin is PAUSED"; then
+    pass "init-profile refuses with exit 3 when .paused exists"
+  else
+    fail "S22a init-profile should refuse (exit=$EX, out=$OUT)"
+  fi
+  [[ ! -f "$tmp/profile.json" ]] && pass "profile.json was NOT created while paused" || fail "S22a2 profile.json wrongly created"
+  teardown_state "$tmp"
+
+  # 22b — commit-calibration also fails when paused (delegates to init)
+  tmp=$(setup_state 22)
+  mv "$tmp/profile.json" "$tmp/profile.json.paused"
+  set +e
+  OUT=$(SOCRATIC_STATE_DIR="$tmp" bash "$SCRIPTS/commit-calibration.sh" --level 3 2>&1); EX=$?
+  set -e
+  if [[ "$EX" != "0" ]]; then
+    pass "commit-calibration refuses while paused (exit=$EX)"
+  else
+    fail "S22b commit-calibration should have failed while paused"
+  fi
+  [[ ! -f "$tmp/profile.json" ]] && pass "profile.json was NOT created by calibrate while paused" || fail "S22b2 calibrate created duplicate profile"
+  teardown_state "$tmp"
+
+  # 22c — normal init (no .paused) still works
+  tmp=$(setup_state 22)
+  rm "$tmp/profile.json"
+  SOCRATIC_STATE_DIR="$tmp" bash "$SCRIPTS/init-profile.sh" > /dev/null
+  [[ -f "$tmp/profile.json" ]] && pass "init-profile works normally when no .paused" || fail "S22c init-profile broke the happy path"
+  teardown_state "$tmp"
+fi
+
 ## S21 per-level calibration thresholds + diagnostic gate
 if should_run 21; then
   header "S21 per-level calibration thresholds + diagnostic gate"

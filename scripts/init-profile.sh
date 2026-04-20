@@ -14,8 +14,28 @@ set -euo pipefail
 
 SOCRATIC_DIR="${SOCRATIC_STATE_DIR:-$HOME/.claude/socratic}"
 PROFILE_PATH="${SOCRATIC_DIR}/profile.json"
+PAUSED_PATH="${SOCRATIC_DIR}/profile.json.paused"
 
 mkdir -p "${SOCRATIC_DIR}"
+
+# Guard: if profile.json is missing but profile.json.paused exists, the
+# plugin is currently paused. Creating a default profile.json here would
+# produce two profiles on disk and make resume.sh refuse with "both files
+# exist". Refuse loudly instead — the user must either resume or
+# explicitly discard the paused state first.
+if [[ ! -f "${PROFILE_PATH}" && -f "${PAUSED_PATH}" ]]; then
+  echo "[abort] plugin is PAUSED — cannot create a new default profile." >&2
+  echo "        profile.json is missing but profile.json.paused exists at:" >&2
+  echo "          ${PAUSED_PATH}" >&2
+  echo "" >&2
+  echo "        run ONE of these before retrying:" >&2
+  echo "          /socratiskill:socratic resume       (restore the paused profile)" >&2
+  echo "          bash scripts/resume.sh              (same, shell equivalent)" >&2
+  echo "" >&2
+  echo "        or, to discard the paused state and start fresh:" >&2
+  echo "          rm ${PAUSED_PATH}" >&2
+  exit 3
+fi
 
 if [[ -f "${PROFILE_PATH}" ]]; then
   echo "profile: EXISTS at ${PROFILE_PATH}"
