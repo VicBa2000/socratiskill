@@ -42,6 +42,18 @@ instructions + TypeScript scripts.
 git clone https://github.com/VicBa2000/socratiskill ~/socratiskill
 ```
 
+> **Where do the files land?** The command above **always** drops the
+> repo at your **home folder**, in a new `socratiskill/` subfolder,
+> regardless of what directory your terminal is currently `cd`'d into.
+> On Windows that is `C:\Users\<you>\socratiskill`, on macOS
+> `/Users/<you>/socratiskill`, on Linux `/home/<you>/socratiskill`.
+> Running the command from `Desktop/`, `Documents/`, `Pictures/`, etc.
+> does **not** change this — `git clone` obeys the destination in the
+> command, not your current location. This is normal, not malware. If
+> you want the repo elsewhere, change the destination (e.g. `git clone
+> <url> ~/Desktop/socratiskill`); whatever path you pick, remember it
+> — Step 2 needs it verbatim.
+
 Then, inside a Claude Code session, register the marketplace **with an
 absolute path** (the `/plugin` CLI does not reliably expand `~` on
 Windows):

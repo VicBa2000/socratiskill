@@ -58,15 +58,33 @@
   1.2 ONE-TIME SETUP (run these once per machine)
   ------------------------------------------------------------------
 
-  Step 1. Clone the plugin repo anywhere you like, and REMEMBER the
-  absolute path — you will pass it verbatim in Step 2.
+  Step 1. Clone the plugin repo. The command below ALWAYS drops the
+  files at ~/socratiskill (your HOME folder), no matter what
+  directory your terminal is currently `cd`'d into.
     git clone https://github.com/VicBa2000/socratiskill ~/socratiskill
 
-    The example above drops the repo at:
-      Windows (Git Bash):  C:/Users/<you>/socratiskill
-      macOS:               /Users/<you>/socratiskill
-      Linux:               /home/<you>/socratiskill
-    Clone wherever you prefer; just know the absolute path.
+  >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+  >  WHERE DO THE FILES LAND?                                      >
+  >                                                                >
+  >  `git clone <url> ~/socratiskill` ignores your terminal's      >
+  >  current directory. It writes the repo into your home folder, >
+  >  which on each OS is:                                          >
+  >                                                                >
+  >    Windows (Git Bash):  C:\Users\<you>\socratiskill            >
+  >    macOS:               /Users/<you>/socratiskill              >
+  >    Linux:               /home/<you>/socratiskill               >
+  >                                                                >
+  >  Even if you run the command from Desktop/, Documents/,        >
+  >  Pictures/, or anywhere else — the files DO NOT appear there. >
+  >  They appear in your home folder, inside a new `socratiskill/` >
+  >  subfolder. This is normal, not malware; `git clone` obeys the >
+  >  destination path in the command, not your current location.   >
+  >                                                                >
+  >  If you want the repo somewhere else, change the destination:  >
+  >    git clone <url> ~/Desktop/socratiskill                      >
+  >    git clone <url> /d/code/socratiskill                        >
+  >  Whatever path you pick, WRITE IT DOWN — Step 2 needs it.      >
+  >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
   Step 2. Tell Claude Code about the plugin (inside a Claude Code
   session). IMPORTANT: the `/plugin` CLI does NOT reliably expand
