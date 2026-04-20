@@ -477,6 +477,51 @@ if should_run 19; then
   teardown_state "$tmp"
 fi
 
+## S21 per-level calibration thresholds (novices need more evidence)
+if should_run 21; then
+  header "S21 per-level calibration thresholds"
+
+  # 21a — at level 1, 5 correct turns must NOT trigger up-suggestion
+  tmp=$(setup_state 21)
+  node -e 'const fs=require("fs"); const p=process.argv[1]+"/profile.json"; const d=JSON.parse(fs.readFileSync(p,"utf-8")); d.global_level=1; fs.writeFileSync(p,JSON.stringify(d,null,2))' "$tmp"
+  for i in 1 2 3 4 5; do
+    fire_stop "$tmp" "q$i" "a$i\n\n<!-- HINT_META {\"topic\":\"t$i\",\"correct\":true,\"domain\":\"fundamentos\",\"hintLevel\":0} /HINT_META -->" > /dev/null
+  done
+  HAS=$(node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")); process.stdout.write(d.pending_calibration_change?"yes":"no")' "$tmp/profile.json")
+  [[ "$HAS" == "no" ]] && pass "level=1 + 5 correct -> no premature up-suggestion" || fail "S21a level 1 pre-maturely suggested up at 5 correct"
+  teardown_state "$tmp"
+
+  # 21b — at level 1, 10 correct in a 12-turn window → must suggest up to 2
+  tmp=$(setup_state 21)
+  node -e 'const fs=require("fs"); const p=process.argv[1]+"/profile.json"; const d=JSON.parse(fs.readFileSync(p,"utf-8")); d.global_level=1; fs.writeFileSync(p,JSON.stringify(d,null,2))' "$tmp"
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    fire_stop "$tmp" "q$i" "a$i\n\n<!-- HINT_META {\"topic\":\"t$i\",\"correct\":true,\"domain\":\"fundamentos\",\"hintLevel\":0} /HINT_META -->" > /dev/null
+  done
+  HAS=$(node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")); const p=d.pending_calibration_change; process.stdout.write(p && p.direction==="up" && p.from===1 && p.to===2 ? "yes" : "no")' "$tmp/profile.json")
+  [[ "$HAS" == "yes" ]] && pass "level=1 + 10 correct -> suggests up to 2" || fail "S21b level 1 did not suggest up at 10 correct"
+  teardown_state "$tmp"
+
+  # 21c — at level 3, 5 correct DO trigger up (advanced rule: 5/7)
+  tmp=$(setup_state 21)
+  node -e 'const fs=require("fs"); const p=process.argv[1]+"/profile.json"; const d=JSON.parse(fs.readFileSync(p,"utf-8")); d.global_level=3; fs.writeFileSync(p,JSON.stringify(d,null,2))' "$tmp"
+  for i in 1 2 3 4 5; do
+    fire_stop "$tmp" "q$i" "a$i\n\n<!-- HINT_META {\"topic\":\"t$i\",\"correct\":true,\"domain\":\"fundamentos\",\"hintLevel\":0} /HINT_META -->" > /dev/null
+  done
+  HAS=$(node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")); const p=d.pending_calibration_change; process.stdout.write(p && p.direction==="up" && p.from===3 && p.to===4 ? "yes" : "no")' "$tmp/profile.json")
+  [[ "$HAS" == "yes" ]] && pass "level=3 + 5 correct -> suggests up to 4" || fail "S21c level 3 did not suggest up at 5 correct"
+  teardown_state "$tmp"
+
+  # 21d — fast downgrade preserved: 3 wrong at level 3 → suggests down to 2
+  tmp=$(setup_state 21)
+  node -e 'const fs=require("fs"); const p=process.argv[1]+"/profile.json"; const d=JSON.parse(fs.readFileSync(p,"utf-8")); d.global_level=3; fs.writeFileSync(p,JSON.stringify(d,null,2))' "$tmp"
+  for i in 1 2 3; do
+    fire_stop "$tmp" "q$i" "a$i\n\n<!-- HINT_META {\"topic\":\"t$i\",\"correct\":false,\"domain\":\"fundamentos\",\"hintLevel\":0} /HINT_META -->" > /dev/null
+  done
+  HAS=$(node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")); const p=d.pending_calibration_change; process.stdout.write(p && p.direction==="down" && p.from===3 && p.to===2 ? "yes" : "no")' "$tmp/profile.json")
+  [[ "$HAS" == "yes" ]] && pass "level=3 + 3 wrong -> fast downgrade to 2" || fail "S21d level 3 did not downgrade at 3 wrong"
+  teardown_state "$tmp"
+fi
+
 # ==========================================================================
 summary
 [[ "$FAIL_COUNT" -eq 0 ]]

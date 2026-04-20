@@ -87,14 +87,40 @@ interface ErrorMapEntry {
   next_review_at: string | null
 }
 
+interface CalibrationRule {
+  window: number
+  correct_required?: number
+  wrong_required?: number
+}
+
 const ALGO = ALGORITHM_JSON as {
   leitner_days: number[]
   calibration_window: number
   calibration_threshold: number
+  calibration_cooldown_turns?: number
+  calibration_up_by_level?: Record<string, CalibrationRule>
+  calibration_down_by_level?: Record<string, CalibrationRule>
 }
 const LEITNER_DAYS: number[] = ALGO.leitner_days ?? [1, 3, 7, 14, 30]
-const CALIBRATION_WINDOW: number = ALGO.calibration_window ?? 5
-const CALIBRATION_THRESHOLD: number = ALGO.calibration_threshold ?? 3
+const CALIBRATION_COOLDOWN_TURNS: number =
+  ALGO.calibration_cooldown_turns ?? ALGO.calibration_window ?? 5
+
+const DEFAULT_UP_BY_LEVEL: Record<string, CalibrationRule> = {
+  "1": { window: 12, correct_required: 10 },
+  "2": { window: 9,  correct_required: 7 },
+  "3": { window: 7,  correct_required: 5 },
+  "4": { window: 7,  correct_required: 5 },
+}
+const DEFAULT_DOWN_BY_LEVEL: Record<string, CalibrationRule> = {
+  "2": { window: 5, wrong_required: 3 },
+  "3": { window: 5, wrong_required: 3 },
+  "4": { window: 5, wrong_required: 3 },
+  "5": { window: 5, wrong_required: 3 },
+}
+const CALIBRATION_UP_BY_LEVEL: Record<string, CalibrationRule> =
+  ALGO.calibration_up_by_level ?? DEFAULT_UP_BY_LEVEL
+const CALIBRATION_DOWN_BY_LEVEL: Record<string, CalibrationRule> =
+  ALGO.calibration_down_by_level ?? DEFAULT_DOWN_BY_LEVEL
 
 interface SessionDoc {
   date: string
@@ -243,29 +269,54 @@ function evaluateCalibration(
   currentTurn: number,
 ): PendingCalibration | null {
   const last = doc.last_calibration_eval_turn
-  if (typeof last === "number" && currentTurn - last < CALIBRATION_WINDOW) return null
-
-  const window = doc.turns
-    .slice(-CALIBRATION_WINDOW)
-    .filter((t) => t.correct === true || t.correct === false)
-  if (window.length < CALIBRATION_THRESHOLD) return null
-
-  const correctCount = window.filter((t) => t.correct === true).length
-  const wrongCount = window.length - correctCount
-
-  let direction: "up" | "down" | null = null
-  if (correctCount >= CALIBRATION_THRESHOLD && userLevel < 5) direction = "up"
-  else if (wrongCount >= CALIBRATION_THRESHOLD && userLevel > 1) direction = "down"
-  if (!direction) return null
-
-  return {
-    direction,
-    from: userLevel,
-    to: direction === "up" ? userLevel + 1 : userLevel - 1,
-    reason: `${correctCount}/${window.length} correct in last window of ${window.length}`,
-    suggested_at: new Date().toISOString(),
-    window_end_turn: currentTurn,
+  if (typeof last === "number" && currentTurn - last < CALIBRATION_COOLDOWN_TURNS) {
+    return null
   }
+
+  const upRule = CALIBRATION_UP_BY_LEVEL[String(userLevel)]
+  const downRule = CALIBRATION_DOWN_BY_LEVEL[String(userLevel)]
+
+  const evaluated = doc.turns.filter(
+    (t) => t.correct === true || t.correct === false,
+  )
+
+  if (upRule && userLevel < 5) {
+    const needed = upRule.correct_required ?? Math.ceil(upRule.window * 0.6)
+    const window = evaluated.slice(-upRule.window)
+    if (window.length >= needed) {
+      const correctCount = window.filter((t) => t.correct === true).length
+      if (correctCount >= needed) {
+        return {
+          direction: "up",
+          from: userLevel,
+          to: userLevel + 1,
+          reason: `${correctCount}/${window.length} correct (needs ${needed}/${upRule.window} at L${userLevel})`,
+          suggested_at: new Date().toISOString(),
+          window_end_turn: currentTurn,
+        }
+      }
+    }
+  }
+
+  if (downRule && userLevel > 1) {
+    const needed = downRule.wrong_required ?? Math.ceil(downRule.window * 0.6)
+    const window = evaluated.slice(-downRule.window)
+    if (window.length >= needed) {
+      const wrongCount = window.filter((t) => t.correct === false).length
+      if (wrongCount >= needed) {
+        return {
+          direction: "down",
+          from: userLevel,
+          to: userLevel - 1,
+          reason: `${wrongCount}/${window.length} wrong (needs ${needed}/${downRule.window} at L${userLevel})`,
+          suggested_at: new Date().toISOString(),
+          window_end_turn: currentTurn,
+        }
+      }
+    }
+  }
+
+  return null
 }
 
 function updateErrorMap(meta: HintMeta): void {
