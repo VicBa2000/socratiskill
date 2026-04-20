@@ -391,6 +391,25 @@ if should_run 18; then
   teardown_state "$tmp"
 fi
 
+## S19 level-1 hard-limits block is injected only when level=1
+if should_run 19; then
+  header "S19 level-1 hard-limits block (only at level 1)"
+  tmp=$(setup_state 19)
+
+  # 19a — at level 1, the CRITICAL block is present
+  node -e 'const fs=require("fs"); const p=process.argv[1]+"/profile.json"; const d=JSON.parse(fs.readFileSync(p,"utf-8")); d.global_level=1; fs.writeFileSync(p,JSON.stringify(d,null,2))' "$tmp"
+  OUT=$(fire_pre "$tmp" "implementame algo")
+  echo "$OUT" | grep -q "LEVEL 1 HARD LIMITS" && pass "level=1 injects HARD LIMITS block" || fail "S19a missing HARD LIMITS at level 1"
+  echo "$OUT" | grep -q "DO NOT call Write" && pass "block reminds about Write/Edit gate" || fail "S19b missing Write gate reminder"
+
+  # 19b — at level 3, the block must NOT appear
+  node -e 'const fs=require("fs"); const p=process.argv[1]+"/profile.json"; const d=JSON.parse(fs.readFileSync(p,"utf-8")); d.global_level=3; fs.writeFileSync(p,JSON.stringify(d,null,2))' "$tmp"
+  OUT=$(fire_pre "$tmp" "implementame algo")
+  echo "$OUT" | grep -q "LEVEL 1 HARD LIMITS" && fail "S19c HARD LIMITS leaked into level 3" || pass "level=3 does NOT inject HARD LIMITS block"
+
+  teardown_state "$tmp"
+fi
+
 # ==========================================================================
 summary
 [[ "$FAIL_COUNT" -eq 0 ]]

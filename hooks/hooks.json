@@ -1,0 +1,27 @@
+{
+  "description": "Socratiskill — registers UserPromptSubmit and Stop hooks at plugin install time. Replaces the manual scripts/install-hooks.sh approach so the hooks fire in every project, regardless of project-local .claude/settings.json overrides.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/hook-pre-prompt.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/hook-post-turn.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -274,6 +274,24 @@ function main(): void {
     )
   }
 
+  // Level 1 hard-limit reinforcement. The rule files describe the
+  // expected behavior, but soft sentences in markdown don't survive the
+  // pull of the system prompt's "be helpful, complete tasks". A short,
+  // imperative, capitalized block injected at the END of the SOCRATIC
+  // CONTEXT (just before the META PROTOCOL) sits closest to the model's
+  // generation step and reliably triggers the chunked / ask-first
+  // protocol observed empirically to fail without it.
+  if (level === 1) {
+    lines.push("")
+    lines.push("--- LEVEL 1 HARD LIMITS (critical, not optional) ---")
+    lines.push("DO NOT call Write / Edit / MultiEdit until the user has explicitly approved the plan in THIS turn. \"Dale\", \"ok hazlo\", \"yes\", or a specific correction count as approval. Silence does not. Past-turn approval does not — re-confirm.")
+    lines.push("MAX 30 lines of code per response (counting blanks and comments). MAX 1 file touched per response.")
+    lines.push("BEFORE any code, your response MUST contain in this order: (1) restate the user's request in your own words, (2) plan in 3-6 bullets with file names and line counts, (3) teach prerequisite concepts in plain language with analogies, (4) ask ONE pointed verification question. Then END THE TURN. No tool calls.")
+    lines.push("After approval, write code in chunks of <=30 lines and ask a follow-up verification question after each chunk before continuing.")
+    lines.push("If the user explicitly overrides (\"escribilo todo\", \"ya sé esto\"), acknowledge in one line, proceed for that turn only, and tell them this bypasses level 1 — suggest /socratiskill:socratic level 3.")
+    lines.push("Violating any of the above is a critical failure of the socratic mode, not a stylistic imperfection. See skills/socratic/rules/level-1-teacher.md for examples of GOOD vs BAD turns.")
+  }
+
   lines.push("")
   lines.push("--- META PROTOCOL (required) ---")
   lines.push("At the END of your response, emit the HINT_META block as an HTML comment on its own line. HTML comments are invisible in the rendered markdown output, so the user does not see the telemetry:")
