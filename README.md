@@ -149,7 +149,7 @@ Invoke as `/socratiskill:socratic <arg>`.
 |---|---|
 | `status` (or no args) | Snapshot: enabled, level, mode, speed, copy, streak, calibrated |
 | `on` / `off` | Soft toggle of the `enabled` flag. When `off`, the hook still fires but injects only a short DISABLED silencer (~30 tokens) telling the model to behave as default Claude Code. |
-| `pause` / `resume` | **True bypass.** Renames `profile.json` ↔ `profile.json.paused` so the hook short-circuits before producing any output. **Zero token cost per turn**, vs ~30 for `off`. Use when you want the plugin truly invisible without uninstalling. |
+| `pause` / `resume` | **True bypass.** Renames `profile.json` ↔ `profile.json.paused` so the hook short-circuits before producing any output. Emits a one-shot silencer on the very first turn after pause (tells the model to forget skill instructions loaded earlier in the session), then **zero token cost per turn** until resume. Use when you want the plugin truly invisible without uninstalling. |
 | `calibrate` | Self-assessment + level update. `calibrate force` to recalibrate. |
 | `level <1-5>` | Manually set global_level |
 | `mode <learn\|productive>` | Change pedagogical mode |
@@ -309,7 +309,7 @@ Two complementary suites — together cover the pedagogical flow AND the
 threat model.
 
 ```bash
-bash tests/run-all.sh         # 21 scenarios, 61 assertions (functional)
+bash tests/run-all.sh         # 21 scenarios, 64 assertions (functional)
 bash tests/run-security.sh    #  8 scenarios, 40 assertions (adversarial)
 # flags for both: --only <N>, --stop-on-fail, --list
 ```
@@ -330,7 +330,7 @@ write under interruption, concurrent RMW on `profile.json`,
 antipattern regex bounds, hostile stdin to the hooks, and topic
 injection (null bytes, RTL unicode, shell metacharacters).
 
-Combined: **101 assertions, all green** as of v0.2.
+Combined: **104 assertions, all green** as of v0.2.
 
 For a manual end-to-end in a live Claude Code session, see
 [MANUAL-TEST.md](./MANUAL-TEST.md).
@@ -363,7 +363,7 @@ scripts/
 data/                  domains, prerequisites, technical terms, antipatterns,
                        roles, algorithm constants
 tests/
-  run-all.sh           21 scenarios, 61 assertions (functional)
+  run-all.sh           21 scenarios, 64 assertions (functional)
   run-security.sh      8 scenarios, 40 assertions (adversarial)
 ```
 

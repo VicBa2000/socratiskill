@@ -415,13 +415,16 @@ if should_run 20; then
     fail "S20a pause did not rename"
   fi
 
-  # 20b — hook short-circuits silently while paused (no output, no silencer)
-  OUT=$(fire_pre "$tmp" "hello while paused")
-  if [[ -z "$OUT" ]]; then
-    pass "hook emits zero stdout while paused"
-  else
-    fail "S20b hook leaked output while paused (got: $OUT)"
-  fi
+  # 20b — first hook run after pause emits a one-shot PAUSED silencer...
+  OUT=$(fire_pre "$tmp" "hello right after pause")
+  echo "$OUT" | head -1 | grep -q "^SOCRATIC CONTEXT: PAUSED" && pass "first hook after pause emits one-shot silencer" || fail "S20b first post-pause hook did not emit silencer (got: $OUT)"
+
+  # 20b2 — ...and subsequent runs are fully silent (zero token cost)
+  OUT=$(fire_pre "$tmp" "hello later while paused")
+  [[ -z "$OUT" ]] && pass "subsequent hooks after pause are silent" || fail "S20b2 hook leaked on 2nd call while paused (got: $OUT)"
+
+  # 20b3 — the one-shot marker was consumed (file deleted)
+  [[ ! -f "$tmp/.pause-silencer-pending" ]] && pass "silencer marker consumed after 1 use" || fail "S20b3 silencer marker not deleted"
 
   # 20c — pause again is idempotent
   OUT=$(SOCRATIC_STATE_DIR="$tmp" bash "$SCRIPTS/pause.sh" 2>&1)
@@ -454,6 +457,12 @@ if should_run 20; then
     fail "S20g resume did not detect conflict (exit=$EX)"
   fi
   rm -f "$tmp/profile.json.paused"
+
+  # 20h — resume without firing a hook still cleans the marker
+  SOCRATIC_STATE_DIR="$tmp" bash "$SCRIPTS/pause.sh" >/dev/null 2>&1
+  [[ -f "$tmp/.pause-silencer-pending" ]] || fail "S20h pause did not create marker for resume cleanup test"
+  SOCRATIC_STATE_DIR="$tmp" bash "$SCRIPTS/resume.sh" >/dev/null 2>&1
+  [[ ! -f "$tmp/.pause-silencer-pending" ]] && pass "resume cleans stale silencer marker" || fail "S20h resume left stale marker"
 
   teardown_state "$tmp"
 fi

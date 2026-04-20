@@ -72,6 +72,15 @@ fi
 # Atomic rename within the same directory. After this, the hook reads
 # the state dir, finds no profile, and exits silently with zero stdout.
 mv -- "$PROFILE" "$PAUSED"
+
+# Drop a one-shot marker so the hook's first run after pause emits a
+# silencer telling the model to ignore previously-loaded skill
+# instructions (HINT_META protocol, restate/plan/verify preambles,
+# etc.). The marker is consumed on the next turn and subsequent turns
+# stay fully silent (zero token cost). See build-context.ts.
+: > "$STATE_DIR/.pause-silencer-pending" 2>/dev/null || true
+
 echo "[paused] $PROFILE → $PAUSED"
-echo "         hook will short-circuit on next turn (zero token cost)."
+echo "         hook will emit a one-shot silencer on the next turn,"
+echo "         then stay silent (zero token cost) until resume."
 echo "         run /socratiskill:socratic resume (or scripts/resume.sh) to reactivate."

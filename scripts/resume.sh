@@ -62,5 +62,10 @@ if [[ "$DRY_RUN" == "1" ]]; then
 fi
 
 mv -- "$PAUSED" "$PROFILE"
+
+# Clean up any stale silencer marker from pause — after resume the
+# model should receive SOCRATIC CONTEXT again, not a DISABLED silencer.
+rm -f "$STATE_DIR/.pause-silencer-pending" 2>/dev/null || true
+
 echo "[resumed] $PAUSED → $PROFILE"
 echo "          hook will inject SOCRATIC CONTEXT on next turn."

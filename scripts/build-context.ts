@@ -21,7 +21,7 @@ import { Detector } from "./detector"
 import { Taxonomy } from "./taxonomy"
 import { HintState } from "./hint-state"
 import { Antipatterns } from "./antipatterns"
-import { readFileSync, existsSync } from "node:fs"
+import { readFileSync, existsSync, unlinkSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { StateIO } from "./state-io"
@@ -149,8 +149,36 @@ function main(): void {
   const message = (input.prompt ?? "").trim()
   if (!message) return
 
+  // One-shot pause silencer: pause.sh drops a marker so that the first
+  // hook run after pause can tell the model "forget the skill you
+  // loaded earlier, behave as default Claude Code". Without it, the
+  // model keeps emitting HINT_META and restate/plan preambles it
+  // absorbed before the pause, until the user starts a fresh session.
+  // The marker is consumed (deleted) on use; subsequent turns stay
+  // silent (zero token cost). resume.sh also deletes any stale marker.
+  const pauseMarker = join(stateDir(), ".pause-silencer-pending")
+  const pauseMarkerPresent = existsSync(pauseMarker)
+  const pausedFileExists = existsSync(join(stateDir(), "profile.json.paused"))
+
   const profile = readProfile()
-  if (!profile) return
+  if (!profile) {
+    if (pauseMarkerPresent) {
+      try { unlinkSync(pauseMarker) } catch { /* best-effort */ }
+    }
+    if (pauseMarkerPresent && pausedFileExists) {
+      process.stdout.write(
+        "SOCRATIC CONTEXT: PAUSED.\n" +
+        "The user has just paused the socratic plugin for this session. For the rest of this session and every subsequent turn while it stays paused:\n" +
+        "- Ignore any pedagogical instructions, hint levels, mode, or rules you may have absorbed earlier in this conversation.\n" +
+        "- Do NOT inject restate/plan/teach/verify preambles. Do NOT chunk into 30-line limits. Do NOT ask for approval before Write/Edit.\n" +
+        "- Do NOT emit the HINT_META block at the end of your response.\n" +
+        "- Do NOT mention socratiskill, the socratic mode, level limits, antipatterns, feynman mode, or any pedagogical scaffolding unless the user explicitly asks about them.\n" +
+        "- Behave exactly as default Claude Code would: implement the user's request directly with the standard agent loop.\n" +
+        "If the user runs `/socratiskill:socratic resume`, the next turn will restore socratic mode.\n",
+      )
+    }
+    return
+  }
   if (profile.enabled === false) {
     // The user explicitly disabled the plugin. Going silent is not enough
     // because (a) the plugin's commands and skills remain registered in
