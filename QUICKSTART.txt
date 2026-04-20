@@ -24,7 +24,8 @@
   Socratiskill installs at the USER level, not per project. Everything
   in 1.2 below is done EXACTLY ONCE per machine.
 
-    [ONE-TIME]      Steps 1-3 in section 1.2.
+    [ONE-TIME]      The install steps in section 1.2 (path A: 2
+                    steps, ~1 minute; path B: 3 steps for devs).
                     Hooks come from the plugin manifest
                     (hooks/hooks.json), so they apply globally to
                     every Claude Code session in every project.
@@ -57,6 +58,33 @@
   ------------------------------------------------------------------
   1.2 ONE-TIME SETUP (run these once per machine)
   ------------------------------------------------------------------
+
+  There are two install paths. Almost everyone wants path A.
+
+  === Path A (RECOMMENDED): install from GitHub ====================
+
+  You do NOT clone anything. Claude Code fetches the plugin for you
+  and can also pull updates later with `/plugin update`.
+
+  Step 1. Inside a Claude Code session:
+    /plugin marketplace add VicBa2000/socratiskill
+    /plugin install socratiskill@socratiskill
+    /reload-plugins
+
+  That's it. Claude Code downloads the plugin into
+  `~/.claude/plugins/marketplaces/socratiskill/` for you. To get
+  future updates, run:
+    /plugin update socratiskill@socratiskill
+
+  Step 2. Calibrate:
+    /socratiskill:socratic calibrate
+
+  Skip Path B unless you plan to edit the plugin source.
+
+  === Path B: install from a local clone (dev / offline mode) ======
+
+  Use this only if you want to edit the plugin code directly.
+  Updates are manual: `git pull` in the clone, then re-install.
 
   Step 1. Clone the plugin repo. The command below ALWAYS drops the
   files at ~/socratiskill (your HOME folder), no matter what
@@ -111,6 +139,11 @@
     `.claude-plugin/marketplace.json` (for example because the `~`
     was taken literally, or you pointed at an empty/partial dir).
     Retry with a correct absolute path before Step 3.
+
+  To update later (path B only):
+    cd ~/socratiskill && git pull
+    # then, inside Claude Code:
+    /plugin update socratiskill@socratiskill
 
   Step 3. Calibrate your pedagogical level (one question):
     /socratiskill:socratic calibrate
@@ -356,6 +389,18 @@
   Problem: I want zero token cost without uninstalling.
     Fix:   /socratiskill:socratic pause
            Resume any time with /socratiskill:socratic resume.
+
+  Problem: How do I get the latest version of the plugin?
+    If you installed via path A (GitHub source):
+           /plugin update socratiskill@socratiskill
+           (Claude Code does a `git pull` for you under the hood.)
+    If you installed via path B (local clone):
+           cd ~/socratiskill && git pull
+           # then, inside Claude Code:
+           /plugin update socratiskill@socratiskill
+           (The `/plugin update` button alone does nothing for path B
+           because Claude Code does not know your local dir is a git
+           repo — you have to pull manually first.)
 
   Problem: /plugin install says "Plugin 'socratiskill' not found in
            any marketplace" right after a "Successfully added

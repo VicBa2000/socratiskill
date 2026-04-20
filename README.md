@@ -36,7 +36,36 @@ instructions + TypeScript scripts.
 
 ---
 
-## Install (local dev)
+## Install
+
+Two paths. Almost everyone wants path A.
+
+### Path A — from GitHub (recommended)
+
+You do **not** clone anything. Inside a Claude Code session:
+
+```
+/plugin marketplace add VicBa2000/socratiskill
+/plugin install socratiskill@socratiskill
+/reload-plugins
+/socratiskill:socratic calibrate
+```
+
+Claude Code fetches the plugin into
+`~/.claude/plugins/marketplaces/socratiskill/` and manages it from
+there. To get future releases:
+
+```
+/plugin update socratiskill@socratiskill
+```
+
+That does a `git pull` of the marketplace and re-installs. One command,
+no terminal gymnastics.
+
+### Path B — from a local clone (dev / offline mode)
+
+Use this only if you want to edit the plugin source. Updates are
+manual (`git pull` + `/plugin update`).
 
 ```bash
 git clone https://github.com/VicBa2000/socratiskill ~/socratiskill
@@ -49,10 +78,7 @@ git clone https://github.com/VicBa2000/socratiskill ~/socratiskill
 > `/Users/<you>/socratiskill`, on Linux `/home/<you>/socratiskill`.
 > Running the command from `Desktop/`, `Documents/`, `Pictures/`, etc.
 > does **not** change this — `git clone` obeys the destination in the
-> command, not your current location. This is normal, not malware. If
-> you want the repo elsewhere, change the destination (e.g. `git clone
-> <url> ~/Desktop/socratiskill`); whatever path you pick, remember it
-> — Step 2 needs it verbatim.
+> command, not your current location. This is normal, not malware.
 
 Then, inside a Claude Code session, register the marketplace **with an
 absolute path** (the `/plugin` CLI does not reliably expand `~` on
@@ -76,16 +102,28 @@ cat ~/.claude/plugins/known_marketplaces.json
 
 If `socratiskill` is **not** listed, the `marketplace add` silently
 failed — Claude Code can still print "Successfully added marketplace"
-when the path given does not contain `.claude-plugin/marketplace.json`
-(e.g. because `~` was taken literally, or the directory is empty).
+when the path given does not contain `.claude-plugin/marketplace.json`.
 Retry with a correct absolute path.
 
-That is the whole setup. The plugin manifest (`hooks/hooks.json`)
-auto-registers the `UserPromptSubmit` and `Stop` hooks via Claude
-Code's plugin system, so the hooks fire in **every** project — no
-per-project setup, no editing of `~/.claude/settings.json`. Calibration
-asks one self-assessment question (1-5) and writes
-`~/.claude/socratic/profile.json` with your pedagogical level.
+To update a path-B install, first pull manually:
+
+```bash
+cd ~/socratiskill && git pull
+```
+
+then, inside Claude Code: `/plugin update socratiskill@socratiskill`.
+The `/plugin update` button alone does nothing for path B because
+Claude Code treats your local clone as a plain directory, not a git
+repo.
+
+### What both paths produce
+
+The plugin manifest (`hooks/hooks.json`) auto-registers the
+`UserPromptSubmit` and `Stop` hooks via Claude Code's plugin system, so
+the hooks fire in **every** project — no per-project setup, no editing
+of `~/.claude/settings.json`. Calibration asks one self-assessment
+question (1-5) and writes `~/.claude/socratic/profile.json` with your
+pedagogical level.
 
 ### Optional: legacy install path
 
