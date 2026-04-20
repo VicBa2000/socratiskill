@@ -58,14 +58,41 @@
   1.2 ONE-TIME SETUP (run these once per machine)
   ------------------------------------------------------------------
 
-  Step 1. Get the plugin files.
+  Step 1. Clone the plugin repo anywhere you like, and REMEMBER the
+  absolute path — you will pass it verbatim in Step 2.
     git clone https://github.com/VicBa2000/socratiskill ~/socratiskill
 
+    The example above drops the repo at:
+      Windows (Git Bash):  C:/Users/<you>/socratiskill
+      macOS:               /Users/<you>/socratiskill
+      Linux:               /home/<you>/socratiskill
+    Clone wherever you prefer; just know the absolute path.
+
   Step 2. Tell Claude Code about the plugin (inside a Claude Code
-  session):
-    /plugin marketplace add ~/socratiskill
+  session). IMPORTANT: the `/plugin` CLI does NOT reliably expand
+  `~` on Windows — always pass the ABSOLUTE path.
+
+    /plugin marketplace add <absolute-path-to-repo>
     /plugin install socratiskill@socratiskill
     /reload-plugins
+
+    Concrete examples (forward slashes work on Windows):
+      /plugin marketplace add C:/Users/<you>/socratiskill
+      /plugin marketplace add /Users/<you>/socratiskill
+      /plugin marketplace add /home/<you>/socratiskill
+
+    After `marketplace add`, verify the registration actually
+    persisted before moving on:
+
+      cat ~/.claude/plugins/known_marketplaces.json
+
+    You should see a "socratiskill" entry with the exact path you
+    passed. If it is NOT there, the add silently failed — Claude
+    Code can print "Successfully added marketplace: socratiskill"
+    even when the directory does not contain
+    `.claude-plugin/marketplace.json` (for example because the `~`
+    was taken literally, or you pointed at an empty/partial dir).
+    Retry with a correct absolute path before Step 3.
 
   Step 3. Calibrate your pedagogical level (one question):
     /socratiskill:socratic calibrate
@@ -311,6 +338,22 @@
   Problem: I want zero token cost without uninstalling.
     Fix:   /socratiskill:socratic pause
            Resume any time with /socratiskill:socratic resume.
+
+  Problem: /plugin install says "Plugin 'socratiskill' not found in
+           any marketplace" right after a "Successfully added
+           marketplace" message.
+    Cause: The `marketplace add` actually failed. Claude Code prints
+           a success line even when the path you gave does not
+           contain .claude-plugin/marketplace.json (for example, if
+           `~` was not expanded by the CLI, you typed a path that
+           only partially exists, or the directory is empty).
+    Fix:   cat ~/.claude/plugins/known_marketplaces.json
+           If "socratiskill" is NOT listed, re-run with an absolute
+           path and forward slashes (no tilde):
+             /plugin marketplace add C:/Users/<you>/socratiskill
+             /plugin install socratiskill@socratiskill
+           Then verify again. `~/.claude/plugins/known_marketplaces.json`
+           is the source of truth.
 
 
 ================================================================================

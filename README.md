@@ -42,14 +42,31 @@ instructions + TypeScript scripts.
 git clone https://github.com/VicBa2000/socratiskill ~/socratiskill
 ```
 
-Then, inside a Claude Code session:
+Then, inside a Claude Code session, register the marketplace **with an
+absolute path** (the `/plugin` CLI does not reliably expand `~` on
+Windows):
 
 ```
-/plugin marketplace add ~/socratiskill
+/plugin marketplace add C:/Users/<you>/socratiskill        # Windows
+/plugin marketplace add /Users/<you>/socratiskill          # macOS
+/plugin marketplace add /home/<you>/socratiskill           # Linux
 /plugin install socratiskill@socratiskill
 /reload-plugins
 /socratiskill:socratic calibrate
 ```
+
+Forward slashes work on Windows. **Verify the marketplace was actually
+registered** by checking that your entry is in the file:
+
+```bash
+cat ~/.claude/plugins/known_marketplaces.json
+```
+
+If `socratiskill` is **not** listed, the `marketplace add` silently
+failed — Claude Code can still print "Successfully added marketplace"
+when the path given does not contain `.claude-plugin/marketplace.json`
+(e.g. because `~` was taken literally, or the directory is empty).
+Retry with a correct absolute path.
 
 That is the whole setup. The plugin manifest (`hooks/hooks.json`)
 auto-registers the `UserPromptSubmit` and `Stop` hooks via Claude
