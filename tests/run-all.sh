@@ -402,6 +402,62 @@ if should_run 18; then
   teardown_state "$tmp"
 fi
 
+## S20 pause/resume cycle
+if should_run 20; then
+  header "S20 pause/resume cycle"
+  tmp=$(setup_state 20)
+
+  # 20a — pause renames profile to .paused
+  OUT=$(SOCRATIC_STATE_DIR="$tmp" bash "$SCRIPTS/pause.sh" 2>&1)
+  if [[ -f "$tmp/profile.json.paused" && ! -f "$tmp/profile.json" ]]; then
+    pass "pause moves profile.json to profile.json.paused"
+  else
+    fail "S20a pause did not rename"
+  fi
+
+  # 20b — hook short-circuits silently while paused (no output, no silencer)
+  OUT=$(fire_pre "$tmp" "hello while paused")
+  if [[ -z "$OUT" ]]; then
+    pass "hook emits zero stdout while paused"
+  else
+    fail "S20b hook leaked output while paused (got: $OUT)"
+  fi
+
+  # 20c — pause again is idempotent
+  OUT=$(SOCRATIC_STATE_DIR="$tmp" bash "$SCRIPTS/pause.sh" 2>&1)
+  echo "$OUT" | grep -q "already paused" && pass "second pause is idempotent" || fail "S20c second pause not idempotent"
+
+  # 20d — resume restores
+  SOCRATIC_STATE_DIR="$tmp" bash "$SCRIPTS/resume.sh" >/dev/null 2>&1
+  if [[ -f "$tmp/profile.json" && ! -f "$tmp/profile.json.paused" ]]; then
+    pass "resume restores profile.json"
+  else
+    fail "S20d resume did not restore"
+  fi
+
+  # 20e — hook injects SOCRATIC CONTEXT again after resume
+  OUT=$(fire_pre "$tmp" "hello after resume")
+  echo "$OUT" | head -1 | grep -q "^SOCRATIC CONTEXT$" && pass "hook resumes injection after resume" || fail "S20e no context after resume"
+
+  # 20f — resume when not paused is idempotent
+  OUT=$(SOCRATIC_STATE_DIR="$tmp" bash "$SCRIPTS/resume.sh" 2>&1)
+  echo "$OUT" | grep -q "not paused" && pass "second resume is idempotent" || fail "S20f second resume not idempotent"
+
+  # 20g — conflict: both files exist → resume must abort exit 1
+  cp "$tmp/profile.json" "$tmp/profile.json.paused"
+  set +e
+  OUT=$(SOCRATIC_STATE_DIR="$tmp" bash "$SCRIPTS/resume.sh" 2>&1); EX=$?
+  set -e
+  if [[ "$EX" == "1" ]] && echo "$OUT" | grep -q "cannot resume"; then
+    pass "resume aborts on conflict (exit 1)"
+  else
+    fail "S20g resume did not detect conflict (exit=$EX)"
+  fi
+  rm -f "$tmp/profile.json.paused"
+
+  teardown_state "$tmp"
+fi
+
 ## S19 level-1 hard-limits block is injected only when level=1
 if should_run 19; then
   header "S19 level-1 hard-limits block (only at level 1)"

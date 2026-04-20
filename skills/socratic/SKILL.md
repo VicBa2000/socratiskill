@@ -56,13 +56,27 @@ first word:
   ```
 
 - `off` -> Deactivate the skill: write `enabled: false` to profile.json.
-  Hooks remain installed but exit immediately (no injection, no
-  recording). Instant toggle; does NOT require `/reload-plugins` or
-  touching settings.json. Respond:
+  Hooks remain installed but inject only a short DISABLED silencer
+  (~30 tokens) telling the model to behave as default Claude Code.
+  Instant toggle; does NOT require `/reload-plugins` or touching
+  settings.json. Respond:
   ```
   socratiskill: disabled
   run /socratiskill:socratic on to re-enable.
   ```
+
+- `pause` -> True bypass — renames `profile.json` to `profile.json.paused`
+  so the hook short-circuits before generating ANY output. Zero token
+  cost per turn (vs ~30 tokens for `off`). Use when you want the plugin
+  truly invisible for a stretch of work without losing your level /
+  streak / error-map. Run `bash <plugin-root>/scripts/pause.sh` and
+  show stdout verbatim.
+
+- `resume` -> Reverse of `pause` — renames `profile.json.paused` back to
+  `profile.json` so hooks resume injecting SOCRATIC CONTEXT on the next
+  turn. Run `bash <plugin-root>/scripts/resume.sh` and show stdout
+  verbatim. Both `pause` and `resume` are idempotent: invoking them
+  twice in a row is a no-op the second time.
 
 - `level <1-5>` -> Update `global_level` in `~/.claude/socratic/profile.json`.
   Validate range. Respond:
@@ -131,7 +145,7 @@ first word:
 For anything else, respond:
 ```
 unknown subcommand: <args>
-valid: status | on | off | calibrate | level <1-5> | mode <learn|productive> | hint | faster | slower | challenge | accept | teach <topic> | endteach | review | journal [today|week|month]
+valid: status | on | off | pause | resume | calibrate | level <1-5> | mode <learn|productive> | hint | faster | slower | challenge | accept | teach <topic> | endteach | review | journal [today|week|month]
 ```
 
 ## Role reference (see rules/)
