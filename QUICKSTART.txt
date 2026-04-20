@@ -390,6 +390,33 @@
     Fix:   /socratiskill:socratic pause
            Resume any time with /socratiskill:socratic resume.
 
+  Problem: I disabled / paused / uninstalled the plugin, but the
+           model still emits HINT_META or restate/plan preambles.
+    Cause: CONTEXT PERSISTENCE. When the plugin was active earlier in
+           THIS session, its SKILL.md and META PROTOCOL instructions
+           were injected into the model's context window. Those
+           instructions cannot be retroactively removed — an LLM has
+           no "forget that earlier system-reminder" operation.
+           Pause / disable / uninstall stop the hook from injecting
+           NEW context, but they do not un-teach what the model
+           already absorbed in this session.
+    Fix:   Restart Claude Code (close the CLI, relaunch). The new
+           session starts with no socratic context loaded, so the
+           model no longer emits HINT_META or restate/plan blocks.
+           `pause` also emits a one-shot silencer on the very first
+           turn after pausing (v0.2+), which helps within the same
+           session — but a restart is the only full guarantee.
+
+  Problem: I uninstalled the plugin but still see "※ recap: ..." lines.
+    Cause: That is a Claude Code / model behavior, not a socratiskill
+           feature. A grep for "recap" in this repo returns zero
+           matches — we never inject that keyword. The recap-summary
+           lines appear in any Claude Code session, regardless of
+           whether socratiskill is installed.
+    Fix:   Not ours to fix. If you want the model to stop producing
+           those auto-summaries, that's a Claude Code / model prompt
+           question, not a plugin one.
+
   Problem: How do I get the latest version of the plugin?
     If you installed via path A (GitHub source):
            /plugin update socratiskill@socratiskill

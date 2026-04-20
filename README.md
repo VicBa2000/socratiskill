@@ -292,6 +292,25 @@ Equivalent shell scripts: `bash scripts/pause.sh` / `bash scripts/resume.sh`.
 /plugin enable socratiskill
 ```
 
+> **Why the model still emits `HINT_META` or `restate/plan/verify`
+> preambles right after you pause/disable/uninstall.** When the plugin
+> was active, its SKILL.md and META PROTOCOL instructions were injected
+> into the model's context as system-reminders. Those instructions live
+> in the conversation's **context window** and cannot be retroactively
+> removed — LLMs have no "forget that earlier message" operation.
+> Pause/disable/uninstall stop the hook from injecting NEW context, but
+> they do not un-teach what the model already absorbed in this session.
+> To fully silence: **restart Claude Code** (close the CLI and relaunch).
+> A fresh session starts with no socratic context loaded. The one-shot
+> silencer emitted by `pause` (added in v0.2) also helps, telling the
+> model to "ignore prior pedagogical instructions" — but context reset
+> via restart is the only guarantee.
+>
+> Separately, the `※ recap:` self-summary lines you may see are a
+> Claude Code / model behavior, not a socratiskill feature — `grep
+> recap` on this repo returns zero matches. They appear in any Claude
+> Code session and are unrelated to the plugin.
+
 **4. Full uninstall** — two equivalent paths:
 
 From inside Claude Code (preferred, no need to know paths):
