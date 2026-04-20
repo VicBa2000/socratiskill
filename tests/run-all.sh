@@ -311,15 +311,26 @@ if should_run 14; then
   header "S14 enabled flag toggle"
   tmp=$(setup_state 14)
   node -e 'const fs=require("fs"); const p=process.argv[1]; const d=JSON.parse(fs.readFileSync(p,"utf-8")); d.enabled=false; fs.writeFileSync(p, JSON.stringify(d,null,2))' "$tmp/profile.json"
+
   OUT=$(fire_pre "$tmp" "hello")
-  [[ -z "$OUT" ]] && pass "disabled: no SOCRATIC CONTEXT" || fail "S14a got output"
+  # When disabled, the hook must emit an explicit "DISABLED" override
+  # instead of staying silent — silence isn't enough because the plugin's
+  # commands stay registered and the model still perceives the plugin.
+  echo "$OUT" | grep -q "SOCRATIC CONTEXT: DISABLED" && pass "disabled: emits DISABLED silencer" || fail "S14a missing silencer"
+  echo "$OUT" | grep -q "Behave exactly as default Claude Code" && pass "disabled: tells model to behave as default" || fail "S14a-2 missing behave-default instruction"
+  # The silencer mentions HINT_META once (to tell the model NOT to emit
+  # it) but must not include the actual META PROTOCOL header that would
+  # request the telemetry block.
+  echo "$OUT" | grep -q "META PROTOCOL (required)" && fail "S14a-3 silencer leaked META PROTOCOL header" || pass "disabled: no META PROTOCOL header"
+
   fire_stop "$tmp" "q" "a\n<!-- HINT_META {\"topic\":\"blocked\",\"correct\":true,\"domain\":\"web\",\"hintLevel\":0} /HINT_META -->" > /dev/null
   TODAY=$(date -u +%Y-%m-%d)
   [[ ! -f "$tmp/sessions/$TODAY.json" ]] && pass "disabled: no session file written" || fail "S14b file written"
+
   # Re-enable
   node -e 'const fs=require("fs"); const p=process.argv[1]; const d=JSON.parse(fs.readFileSync(p,"utf-8")); d.enabled=true; fs.writeFileSync(p, JSON.stringify(d,null,2))' "$tmp/profile.json"
   OUT=$(fire_pre "$tmp" "hello")
-  echo "$OUT" | head -1 | grep -q "SOCRATIC CONTEXT" && pass "enabled=true restores injection" || fail "S14c no context"
+  echo "$OUT" | head -1 | grep -q "^SOCRATIC CONTEXT$" && pass "enabled=true restores full injection" || fail "S14c no context after re-enable"
   teardown_state "$tmp"
 fi
 

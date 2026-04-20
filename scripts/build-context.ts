@@ -151,7 +151,26 @@ function main(): void {
 
   const profile = readProfile()
   if (!profile) return
-  if (profile.enabled === false) return
+  if (profile.enabled === false) {
+    // The user explicitly disabled the plugin. Going silent is not enough
+    // because (a) the plugin's commands and skills remain registered in
+    // Claude Code's available-skills list, so the model still perceives
+    // the plugin's existence, and (b) earlier turns in the session may
+    // already contain socratic context that biases behavior. Emit an
+    // explicit override that tells the model to forget the pedagogical
+    // mode and behave as default Claude Code for this turn.
+    process.stdout.write(
+      "SOCRATIC CONTEXT: DISABLED.\n" +
+      "The user has turned the socratic plugin OFF for this session. For this turn and every subsequent turn while it stays off:\n" +
+      "- Ignore any pedagogical instructions, hint levels, mode, or rules you may have absorbed earlier in this conversation.\n" +
+      "- Do NOT inject restate/plan/teach/verify preambles. Do NOT chunk into 30-line limits. Do NOT ask for approval before Write/Edit.\n" +
+      "- Do NOT emit the HINT_META block at the end of your response.\n" +
+      "- Do NOT mention socratiskill, the socratic mode, level limits, antipatterns, feynman mode, or any pedagogical scaffolding unless the user explicitly asks about them.\n" +
+      "- Behave exactly as default Claude Code would: implement the user's request directly with the standard agent loop.\n" +
+      "If the user runs `/socratiskill:socratic on`, the next turn will resume socratic mode.\n",
+    )
+    return
+  }
 
   const level = Math.min(5, Math.max(1, Number(profile.global_level) || 3))
   const mode = profile.mode === "productive" ? "productive" : "learn"
