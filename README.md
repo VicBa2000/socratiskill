@@ -161,6 +161,7 @@ Invoke as `/socratiskill:socratic <arg>`.
 | `endteach` | Close Feynman mode and print a gap summary |
 | `review` | Run one due Leitner card (spaced repetition) |
 | `journal [today\|week\|month]` | Generate a markdown rollup in `~/.claude/socratic/journal/` |
+| `reset` / `reset force` | Wipe all local socratic state (profile, journal, error-map, sessions, antipatterns). Bare `reset` prints a confirmation prompt; `reset force` invokes `uninstall.sh --purge` with its hardened path guards. Plugin itself stays installed — complete removal still needs `/plugin uninstall socratiskill`. |
 
 ### Choosing between `off`, `pause`, and `disable`
 
@@ -291,9 +292,16 @@ Equivalent shell scripts: `bash scripts/pause.sh` / `bash scripts/resume.sh`.
 /plugin enable socratiskill
 ```
 
-**4. Full uninstall** — removes hook entries from `~/.claude/settings.json`
-(only relevant if you used the legacy install path), asks about the
-state directory:
+**4. Full uninstall** — two equivalent paths:
+
+From inside Claude Code (preferred, no need to know paths):
+```
+/socratiskill:socratic reset force       # wipes state
+/plugin uninstall socratiskill            # removes plugin
+/plugin marketplace remove socratiskill
+```
+
+Or from the shell (same guards):
 ```bash
 bash scripts/uninstall.sh
 # flags: --keep-state, --purge, --dry-run

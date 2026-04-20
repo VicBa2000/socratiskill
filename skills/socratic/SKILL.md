@@ -1,7 +1,7 @@
 ---
 name: socratic
 description: Adaptive socratic mentor entry point. Invoked as /socratiskill:socratic to view the current pedagogical profile, change level/mode, or inspect which rules are active. For automatic per-turn injection, the plugin's UserPromptSubmit hook handles it outside this skill.
-argument-hint: "[status | on | off | calibrate | level <1-5> | mode <learn|productive> | hint | faster | slower | challenge | accept | teach <topic> | endteach | review | journal [today|week|month]]"
+argument-hint: "[status | on | off | pause | resume | calibrate | level <1-5> | mode <learn|productive> | hint | faster | slower | challenge | accept | teach <topic> | endteach | review | journal [today|week|month] | reset [force]]"
 allowed-tools: [Read, Write, Bash]
 ---
 
@@ -142,10 +142,35 @@ first word:
   and show stdout verbatim. The script also writes
   `~/.claude/socratic/journal/<file>.md` for later reference.
 
+- `reset` -> Wipe ALL local socratic state (profile, journal,
+  error-map, sessions, antipatterns). Destructive — requires confirmation
+  unless `reset force` is passed. Run
+  `bash <plugin-root>/scripts/uninstall.sh --purge` (the script has
+  hardened path-traversal guards — refuses any STATE_DIR not under
+  `$HOME/.claude/socratic/`). After the state is gone, print:
+  ```
+  [ok] state wiped: ~/.claude/socratic/
+
+  the plugin itself is still installed. to fully remove it:
+    /plugin uninstall socratiskill
+    /plugin marketplace remove socratiskill
+  to keep using the plugin, run /socratiskill:socratic calibrate
+  again to create a fresh profile.
+  ```
+  If the user passes bare `reset` (no force), ask once:
+  ```
+  this will DELETE your entire socratic state (profile, journal,
+  error-map, sessions, antipatterns) at ~/.claude/socratic/.
+  this cannot be undone.
+  
+  to proceed, run: /socratiskill:socratic reset force
+  ```
+  and do NOT invoke the script.
+
 For anything else, respond:
 ```
 unknown subcommand: <args>
-valid: status | on | off | pause | resume | calibrate | level <1-5> | mode <learn|productive> | hint | faster | slower | challenge | accept | teach <topic> | endteach | review | journal [today|week|month]
+valid: status | on | off | pause | resume | calibrate | level <1-5> | mode <learn|productive> | hint | faster | slower | challenge | accept | teach <topic> | endteach | review | journal [today|week|month] | reset [force]
 ```
 
 ## Role reference (see rules/)

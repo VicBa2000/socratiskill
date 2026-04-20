@@ -441,13 +441,21 @@
     /plugin disable socratiskill
     /plugin enable socratiskill      (to re-enable)
 
-  6.4 FULL UNINSTALL:
-    bash ~/socratiskill/scripts/uninstall.sh
-    (asks interactively whether to keep your journal/profile; use
-    --keep-state or --purge to skip the prompt; --dry-run to preview)
+  6.4 FULL UNINSTALL — two equivalent paths:
 
+    Inside Claude Code (preferred — no path juggling):
+      /socratiskill:socratic reset force    (wipes state; hardened guards)
+      /plugin uninstall socratiskill         (removes the plugin cache)
+      /plugin marketplace remove socratiskill
+
+    Or from the shell (same end result):
+      bash ~/socratiskill/scripts/uninstall.sh
+        (asks interactively whether to keep your journal/profile;
+         use --keep-state or --purge to skip the prompt;
+         --dry-run to preview)
     Then, inside Claude Code:
-    /plugin uninstall socratiskill
+      /plugin uninstall socratiskill
+      /plugin marketplace remove socratiskill
 
   Notes:
     - With the v0.2 plugin manifest install, the hooks are registered
