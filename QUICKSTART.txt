@@ -24,28 +24,34 @@
   Socratiskill installs at the USER level, not per project. Everything
   in 1.2 below is done EXACTLY ONCE per machine.
 
-    [ONE-TIME]      Steps 1-4 in section 1.2.
-                    Hooks are written to ~/.claude/settings.json.
+    [ONE-TIME]      Steps 1-3 in section 1.2.
+                    Hooks come from the plugin manifest
+                    (hooks/hooks.json), so they apply globally to
+                    every Claude Code session in every project.
                     State lives in ~/.claude/socratic/.
-                    These are global to your Claude Code installation.
 
     [PER PROJECT]   Nothing. The mentor follows you across every
-                    project / working directory automatically. No
-                    per-repo setup, no .claude/ directory in your
-                    project, no environment variables.
+                    project / working directory automatically. The
+                    plugin manifest hooks fire even in projects that
+                    have their own .claude/settings.json (which would
+                    otherwise override user-level hook entries).
 
     [PER SESSION]   Nothing. Each new Claude Code console you launch
                     picks up the hooks and the plugin automatically.
                     You don't run `/plugin install` or anything else
                     on session start.
 
-                    The only thing you may want to toggle per session
-                    is enable/disable, if you sometimes prefer vanilla
-                    Claude Code:
-                      /socratiskill:socratic off    -> mute mentor
-                      /socratiskill:socratic on     -> re-enable
-                    The flag is persisted, so "off" stays off across
-                    sessions until you turn it back on.
+                    Per-session toggles you may want:
+                      /socratiskill:socratic off    -> soft mute (keeps
+                                                       hook running but
+                                                       injects only a
+                                                       30-token silencer)
+                      /socratiskill:socratic pause  -> TRUE bypass (zero
+                                                       tokens; renames
+                                                       profile aside)
+                      /socratiskill:socratic on     -> undo `off`
+                      /socratiskill:socratic resume -> undo `pause`
+                    All four are persisted across sessions.
 
 
   ------------------------------------------------------------------
@@ -55,22 +61,28 @@
   Step 1. Get the plugin files.
     git clone https://github.com/VicBa2000/socratiskill ~/socratiskill
 
-  Step 2. Run the installer (seeds profile.json, registers hooks).
-    bash ~/socratiskill/scripts/install.sh
-
-  Step 3. Tell Claude Code where the plugin is (inside a Claude Code
+  Step 2. Tell Claude Code about the plugin (inside a Claude Code
   session):
     /plugin marketplace add ~/socratiskill
     /plugin install socratiskill@socratiskill
     /reload-plugins
 
-  Step 4. Calibrate your pedagogical level (one question):
+  Step 3. Calibrate your pedagogical level (one question):
     /socratiskill:socratic calibrate
     -> pick 1..5 (Novice / Basic / Intermediate / Advanced / Expert).
+    -> this also creates ~/.claude/socratic/profile.json the first time.
 
   You are done. From now on, every Claude Code console you open in
   any project responds as a socratic mentor adapted to your level.
   Keep coding normally.
+
+  Optional: if for some reason you do NOT want to install via the
+  plugin system (e.g. you want hook entries written directly into
+  ~/.claude/settings.json), use the legacy installer instead of
+  Step 2:
+    bash ~/socratiskill/scripts/install.sh
+  Do NOT mix both — running install.sh AND installing as a plugin
+  would register the hooks twice, doubling the token cost per turn.
 
 
 ================================================================================
@@ -88,13 +100,35 @@
     Reads: ~/.claude/socratic/profile.json
 
   ------------------------------------------------------------------
-  2.2 TURN THE MENTOR ON / OFF
+  2.2 TURN THE MENTOR ON / OFF / PAUSE
   ------------------------------------------------------------------
-    /socratiskill:socratic off          -> disable the mentor (vanilla mode)
-    /socratiskill:socratic on           -> re-enable
+    /socratiskill:socratic off          -> SOFT mute (hook still runs;
+                                           injects ~30-token DISABLED
+                                           silencer telling the model
+                                           to act as default Claude Code)
+    /socratiskill:socratic on           -> undo `off`
 
-    Toggle is instant. Hooks stay installed but exit immediately when
-    disabled. Perfect for moments you just want a plain code assistant.
+    /socratiskill:socratic pause        -> TRUE bypass (renames
+                                           profile.json aside; hook
+                                           short-circuits at zero token
+                                           cost, ~5ms)
+    /socratiskill:socratic resume       -> undo `pause`
+
+    When to use which:
+
+      DEFAULT      full pedagogy, ~200-400 tokens/turn of context
+      `off`        instant toggle, ~30 tokens/turn, state preserved
+      `pause`      zero tokens/turn, state preserved in .paused file
+      /plugin disable socratiskill       no hooks at all (Claude Code
+                                         feature; reverse with /enable)
+      /plugin uninstall socratiskill     full removal (also run
+                                         scripts/uninstall.sh first if
+                                         you used the legacy install)
+
+    `off` and `pause` are persisted across sessions. The shell-script
+    fallbacks bash scripts/pause.sh and bash scripts/resume.sh do the
+    exact same thing — useful if the dispatcher is broken or you want
+    to script it from a CI / wrapper.
 
   ------------------------------------------------------------------
   2.3 CHANGE THE LEVEL / MODE
@@ -252,37 +286,84 @@
 
   Problem: You want to start completely fresh.
     Fix:   bash ~/socratiskill/scripts/uninstall.sh --purge
-           Then re-run install.sh.
+           Then /plugin install socratiskill@socratiskill again
+           and /socratiskill:socratic calibrate.
+
+  Problem: Hooks fire twice per turn (you see two SOCRATIC CONTEXT
+           blocks, or counters are doubling).
+    Cause: You ran both `bash scripts/install.sh` AND installed via
+           `/plugin install`, so the hooks are registered twice
+           (once in ~/.claude/settings.json, once via the plugin
+           manifest).
+    Fix:   bash ~/socratiskill/scripts/uninstall.sh --keep-state
+           This removes the settings.json entries; the plugin
+           manifest hooks remain and you have a single firing.
+
+  Problem: Plugin appears to be doing nothing in a specific project.
+    Cause: That project has its own .claude/settings.json. Before
+           v0.2 the user-level hooks did not propagate; now they do
+           because plugin manifest hooks are global. If you are still
+           on v0.1 or used the legacy install path, run:
+             cd <that-project>
+             CLAUDE_SETTINGS="$(pwd)/.claude/settings.json" \
+               bash ~/socratiskill/scripts/install-hooks.sh
+
+  Problem: I want zero token cost without uninstalling.
+    Fix:   /socratiskill:socratic pause
+           Resume any time with /socratiskill:socratic resume.
 
 
 ================================================================================
-  6. DISABLE / UNINSTALL
+  6. DISABLE / PAUSE / UNINSTALL
 ================================================================================
 
-  Temporary pause:
+  Four levels of "stop the plugin", from softest to heaviest:
+
+  6.1 SOFT MUTE (state preserved, ~30 tokens/turn for silencer):
     /socratiskill:socratic off
+    /socratiskill:socratic on        (to re-enable)
 
-  Full uninstall:
+  6.2 TRUE BYPASS (state preserved, zero token cost):
+    /socratiskill:socratic pause
+    /socratiskill:socratic resume    (to come back)
+
+    Equivalent shell scripts (useful from CI / scripts):
+      bash ~/socratiskill/scripts/pause.sh
+      bash ~/socratiskill/scripts/resume.sh
+
+  6.3 PLUGIN-LEVEL DISABLE (Claude Code feature):
+    /plugin disable socratiskill
+    /plugin enable socratiskill      (to re-enable)
+
+  6.4 FULL UNINSTALL:
     bash ~/socratiskill/scripts/uninstall.sh
     (asks interactively whether to keep your journal/profile; use
-    --keep-state or --purge to skip the prompt)
+    --keep-state or --purge to skip the prompt; --dry-run to preview)
 
     Then, inside Claude Code:
     /plugin uninstall socratiskill
 
-  Hooks live in ~/.claude/settings.json under data.hooks.UserPromptSubmit
-  and data.hooks.Stop. The uninstaller removes ONLY the socratiskill
-  entries; other hooks you may have are preserved.
+  Notes:
+    - With the v0.2 plugin manifest install, the hooks are registered
+      via hooks/hooks.json and NOT in ~/.claude/settings.json. The
+      uninstall.sh hook-removal step only matters if you used the
+      legacy install path.
+    - uninstall.sh has hardened guards: it refuses to rm -rf any
+      SOCRATIC_STATE_DIR that is not absolute, not under $HOME, lacks
+      the .claude/socratic segment, or contains a `..` traversal.
 
 
 ================================================================================
   7. DEEPER READING
 ================================================================================
 
-  README.md           overview, architecture, limitations
-  MANUAL-TEST.md      step-by-step end-to-end test plan (5 scenarios)
-  tests/run-all.sh    synthetic test suite (18 scenarios, 42+ assertions)
-  CLAUDE.md           contributor-oriented technical notes
+  README.md            overview, architecture, robustness invariants,
+                       limitations
+  MANUAL-TEST.md       step-by-step end-to-end test plan (7 scenarios)
+  tests/run-all.sh     functional test suite (20 scenarios, 54 assertions)
+  tests/run-security.sh adversarial test suite (8 scenarios, 40 asserts)
+  hooks/hooks.json     plugin manifest hook declarations
+  CLAUDE.md            contributor-oriented technical notes
 
 ================================================================================
   END

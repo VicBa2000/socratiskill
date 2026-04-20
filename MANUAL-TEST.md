@@ -1,18 +1,22 @@
 # Socratiskill — manual E2E test plan
 
-Five scenarios (+ one sanity check) to validate the plugin in a clean
+Seven scenarios (+ one sanity check) to validate the plugin in a clean
 install before release. Each test is marked PASS if the observed result
 matches the expected one.
 
-> **Prerequisite for every test**: run
-> `bash scripts/install.sh` and then, in a fresh
-> Claude Code session:
+> **Prerequisite for every test**: in a fresh Claude Code session,
 >
 > ```
 > /plugin marketplace add <path-to-repo>
 > /plugin install socratiskill@socratiskill
 > /reload-plugins
 > ```
+>
+> The plugin manifest (`hooks/hooks.json`) registers the
+> `UserPromptSubmit` and `Stop` hooks automatically. **`bash
+> scripts/install.sh` is no longer required** — it remains as a
+> legacy fallback for users who do not install via the plugin system.
+> Profile is created on first `calibrate`.
 
 ---
 
@@ -143,19 +147,90 @@ cross-session aggregates.
 
 ---
 
-## Extra sanity: toggle off/on
+## Scenario 6 — Pause / resume (true bypass)
+
+**Goal**: `pause` makes the plugin invisible at zero token cost; `resume`
+restores it without losing state.
+
+1. Confirm baseline:
+   ```
+   /socratiskill:socratic status
+   ```
+   Note your `level` and `enabled: true`.
+2. ```
+   /socratiskill:socratic pause
+   ```
+   **Expected**: `[paused] ... → ....paused / hook will short-circuit
+   on next turn (zero token cost).` Verify on disk:
+   ```bash
+   ls ~/.claude/socratic/profile.json*
+   ```
+   You should see `profile.json.paused` and **no** `profile.json`.
+3. Send any normal prompt (e.g. *"explicame closures"*).
+   **Expected**: Claude responds as vanilla Claude Code — no
+   restate/plan/teach/verify preamble, no `HINT_META` block. If you
+   inspect system-reminders in debug mode, **no** `SOCRATIC CONTEXT`
+   appears.
+4. ```
+   /socratiskill:socratic resume
+   ```
+   **Expected**: `[resumed] ... → profile.json / hook will inject
+   SOCRATIC CONTEXT on next turn.` `profile.json` is back, `.paused`
+   is gone.
+5. Send another prompt. SOCRATIC CONTEXT is injected again. Your
+   level / streak / error-map are intact.
+6. **Idempotency check**: run `/socratiskill:socratic pause` twice in a
+   row. Second invocation should respond `[noop] already paused`. Same
+   for `resume`.
+
+---
+
+## Scenario 7 — Uninstall path-traversal guard
+
+**Goal**: `uninstall.sh --purge` refuses to operate on dangerous
+`SOCRATIC_STATE_DIR` values.
+
+> This scenario uses synthetic environment variables; it does NOT
+> touch your real state. Run from any shell.
+
+1. Each of the following invocations must abort with exit 2 and a clear
+   `[abort]` message, leaving the path intact:
+   ```bash
+   SOCRATIC_STATE_DIR=/ bash scripts/uninstall.sh --purge
+   SOCRATIC_STATE_DIR="$HOME" bash scripts/uninstall.sh --purge
+   SOCRATIC_STATE_DIR=/etc bash scripts/uninstall.sh --purge
+   SOCRATIC_STATE_DIR="$HOME/Documents" bash scripts/uninstall.sh --purge
+   SOCRATIC_STATE_DIR="$HOME/.claude/socratic/../../../tmp" bash scripts/uninstall.sh --purge
+   ```
+2. Each command should print one of:
+   - `refusing to rm -rf a root-level / home path`
+   - `must live under $HOME`
+   - `must contain '.claude/socratic' segment`
+   - `contains '..' path segment`
+3. Verify your real state was not touched:
+   ```bash
+   ls ~/.claude/socratic/
+   ```
+
+---
+
+## Extra sanity: toggle off/on (soft silencer)
 
 1. ```
    /socratiskill:socratic off
    ```
    Response: `socratiskill: disabled`.
 2. Any prompt. If you have a debug toggle that exposes system-reminders,
-   SOCRATIC CONTEXT does not appear. The model responds as vanilla
-   Claude Code.
+   `SOCRATIC CONTEXT: DISABLED.` appears (a short silencer that tells
+   the model to behave as default Claude Code) — **not** the full
+   pedagogical context. The model responds as vanilla Claude Code.
 3. ```
    /socratiskill:socratic on
    ```
-4. New prompt: SOCRATIC CONTEXT is injected again.
+4. New prompt: full SOCRATIC CONTEXT is injected again.
+
+> Note: `off` still costs ~30 tokens/turn for the silencer message.
+> If you want **zero** token cost, use `pause` instead (Scenario 6).
 
 ---
 

@@ -7,7 +7,7 @@
     ╚══════╝ ╚═════╝  ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝   ╚═╝╚══════╝╚═╝  ╚═╝╚═╝╚══════╝╚══════╝
     ──────────────────────────────────────────────────────────────────────────────────────
     ░▒▓█   A D A P T I V E   S O C R A T I C   M E N T O R   F O R   C L A U D E   █▓▒░
-                       >>  v0.1 · MIT · github.com/VicBa2000/socratiskill  <<
+                       >>  v0.2 · MIT · github.com/VicBa2000/socratiskill  <<
 ```
 
 # Socratiskill
@@ -40,17 +40,7 @@ instructions + TypeScript scripts.
 
 ```bash
 git clone https://github.com/VicBa2000/socratiskill ~/socratiskill
-cd ~/socratiskill
-bash scripts/install.sh
 ```
-
-What it does:
-1. Verifies `bun` + `node` are available.
-2. Creates `~/.claude/socratic/profile.json` with defaults (level 3,
-   learn mode, enabled=true).
-3. Registers the `UserPromptSubmit` + `Stop` hooks in
-   `~/.claude/settings.json`, pointing to the plugin's scripts
-   (idempotent — re-running is a no-op).
 
 Then, inside a Claude Code session:
 
@@ -61,8 +51,26 @@ Then, inside a Claude Code session:
 /socratiskill:socratic calibrate
 ```
 
-Calibration asks a single self-assessment question (1-5) and sets
-your pedagogical level accordingly.
+That is the whole setup. The plugin manifest (`hooks/hooks.json`)
+auto-registers the `UserPromptSubmit` and `Stop` hooks via Claude
+Code's plugin system, so the hooks fire in **every** project — no
+per-project setup, no editing of `~/.claude/settings.json`. Calibration
+asks one self-assessment question (1-5) and writes
+`~/.claude/socratic/profile.json` with your pedagogical level.
+
+### Optional: legacy install path
+
+If you prefer not to use the plugin system (for example you want
+the hooks installed directly into `~/.claude/settings.json`), run:
+
+```bash
+bash ~/socratiskill/scripts/install.sh
+```
+
+This verifies `bun` + `node`, seeds `profile.json` with defaults, and
+writes the hook entries to `~/.claude/settings.json` (idempotent).
+Use this **only** if you are not installing as a plugin — otherwise
+you would register the hooks twice and they would fire 2× per turn.
 
 ---
 
@@ -73,7 +81,8 @@ Invoke as `/socratiskill:socratic <arg>`.
 | Subcommand | Effect |
 |---|---|
 | `status` (or no args) | Snapshot: enabled, level, mode, speed, copy, streak, calibrated |
-| `on` / `off` | Toggle the enabled flag (hooks stop injecting without touching settings.json) |
+| `on` / `off` | Soft toggle of the `enabled` flag. When `off`, the hook still fires but injects only a short DISABLED silencer (~30 tokens) telling the model to behave as default Claude Code. |
+| `pause` / `resume` | **True bypass.** Renames `profile.json` ↔ `profile.json.paused` so the hook short-circuits before producing any output. **Zero token cost per turn**, vs ~30 for `off`. Use when you want the plugin truly invisible without uninstalling. |
 | `calibrate` | Self-assessment + level update. `calibrate force` to recalibrate. |
 | `level <1-5>` | Manually set global_level |
 | `mode <learn\|productive>` | Change pedagogical mode |
@@ -86,6 +95,20 @@ Invoke as `/socratiskill:socratic <arg>`.
 | `review` | Run one due Leitner card (spaced repetition) |
 | `journal [today\|week\|month]` | Generate a markdown rollup in `~/.claude/socratic/journal/` |
 
+### Choosing between `off`, `pause`, and `disable`
+
+| State | Token cost / turn | Hook executes | State preserved | How to revert |
+|---|---|---|---|---|
+| Default | full SOCRATIC CONTEXT (~200-400) | yes | yes | — |
+| `off` | ~30 (silencer) | yes | yes | `/socratiskill:socratic on` |
+| `pause` | **0** | yes but exits in ~5ms | yes (in `.paused`) | `/socratiskill:socratic resume` |
+| `/plugin disable` | 0 | no | yes | `/plugin enable` |
+| `/plugin uninstall` | 0 | no | only with `--keep-state` | reinstall + recalibrate |
+
+`pause` fills the gap between `off` (soft) and `disable` (heavy) — the
+sweet spot for "I want zero token cost without touching the plugin
+manifest".
+
 ---
 
 ## How it works
@@ -97,13 +120,38 @@ Invoke as `/socratiskill:socratic <arg>`.
    slow-down, domain taxonomy) + error-map (Leitner due) + antipattern
    state + feynman state from the session file. Emits a
    `SOCRATIC CONTEXT` block to stdout. Claude Code injects it into the
-   model context as a `system-reminder`.
+   model context as a `system-reminder`. At level 1, the block also
+   includes a `LEVEL 1 HARD LIMITS` reinforcement (max 30 lines per
+   turn, max 1 file, mandatory restate→plan→teach→verify protocol).
 2. **`Stop` hook** -> runs `scripts/record-turn.ts`, which parses the
    transcript, extracts the HINT_META (emitted as an HTML comment,
    invisible to the user), and updates the session file + error-map +
    antipattern state + continuous calibration.
-3. **Skills** -> `/socratiskill:socratic` (user-invoked) is the
+3. **Hook registration** -> declared in `hooks/hooks.json` and
+   auto-registered when the plugin is installed via `/plugin install`.
+   No editing of `~/.claude/settings.json` required. The hooks fire in
+   every project regardless of project-local `.claude/settings.json`.
+4. **Skills** -> `/socratiskill:socratic` (user-invoked) is the
    control panel; `/socratiskill:socratic-ping` is a health probe.
+
+### Robustness invariants
+
+- **Atomic writes** for every state JSON via `tmp + renameSync` —
+  a process killed mid-write leaves the previous file intact, never a
+  half-written one.
+- **`O_EXCL` lock** on `profile.json` read-modify-write so concurrent
+  Claude Code sessions never lose updates. Cross-platform (no `flock`
+  dependency on Git Bash for Windows).
+- **Schema validators** post-`JSON.parse` reject corrupted or
+  schema-shifted state and fall back to defaults instead of
+  propagating undefined fields.
+- **Corrupt session recovery**: if `sessions/<date>.json` is malformed,
+  start-teach backs it up to `<path>.corrupt-<epoch>` and starts
+  fresh; end-teach backs up and aborts so no turns are lost.
+- **`uninstall.sh` path guard**: refuses any `STATE_DIR` that is not
+  absolute, not under `$HOME`, lacks the `.claude/socratic` segment,
+  or contains a `..` traversal. Both POSIX and Windows-native
+  absolute paths are accepted.
 
 ### Persistent state
 
@@ -151,16 +199,34 @@ with that residue.
 
 ---
 
-## Disable / uninstall
+## Disable / pause / uninstall
 
-**Temporary toggle** (keeps state and hooks):
-```
-/socratiskill:socratic off
-```
-To re-enable: `/socratiskill:socratic on`.
+Four levels of "stop the plugin", from softest to heaviest:
 
-**Full uninstall** (removes hooks from settings.json, asks about the
-history):
+**1. Soft toggle** — keeps state, hook still runs but injects only a
+short DISABLED silencer (~30 tokens):
+```
+/socratiskill:socratic off       # disable
+/socratiskill:socratic on        # re-enable
+```
+
+**2. True bypass** — keeps state, hook short-circuits to zero output
+(zero token cost):
+```
+/socratiskill:socratic pause     # rename profile.json → .paused
+/socratiskill:socratic resume    # rename back
+```
+Equivalent shell scripts: `bash scripts/pause.sh` / `bash scripts/resume.sh`.
+
+**3. Plugin-level disable** (Claude Code feature, hooks stop registering):
+```
+/plugin disable socratiskill
+/plugin enable socratiskill
+```
+
+**4. Full uninstall** — removes hook entries from `~/.claude/settings.json`
+(only relevant if you used the legacy install path), asks about the
+state directory:
 ```bash
 bash scripts/uninstall.sh
 # flags: --keep-state, --purge, --dry-run
@@ -172,12 +238,29 @@ Then, inside Claude Code: `/plugin uninstall socratiskill`.
 
 ## Testing
 
-Run the full synthetic test suite (18 scenarios, 42+ assertions):
+Two complementary suites — together cover the pedagogical flow AND the
+threat model.
 
 ```bash
-bash tests/run-all.sh
-# flags: --only <N>, --stop-on-fail, --list
+bash tests/run-all.sh         # 20 scenarios, 54 assertions (functional)
+bash tests/run-security.sh    #  8 scenarios, 40 assertions (adversarial)
+# flags for both: --only <N>, --stop-on-fail, --list
 ```
+
+**`run-all.sh`** exercises every script and state transition in
+isolated temp dirs: calibration, hint escalation, antipatterns, Feynman
+mode, Leitner spaced repetition, journal generation, install/uninstall
+idempotence, the level-1 hard-limits block injection, the pause/resume
+cycle, and the `enabled=false` silencer.
+
+**`run-security.sh`** runs adversarial tests against the audit guards:
+hostile `STATE_DIR` values to `uninstall.sh` (path traversal, root,
+`$HOME`, outside `$HOME`), corrupt session JSON recovery, atomic
+write under interruption, concurrent RMW on `profile.json`,
+antipattern regex bounds, hostile stdin to the hooks, and topic
+injection (null bytes, RTL unicode, shell metacharacters).
+
+Combined: **94 assertions, all green** as of v0.2.
 
 For a manual end-to-end in a live Claude Code session, see
 [MANUAL-TEST.md](./MANUAL-TEST.md).
@@ -188,6 +271,8 @@ For a manual end-to-end in a live Claude Code session, see
 
 ```
 .claude-plugin/        plugin.json + marketplace.json
+hooks/
+  hooks.json           plugin manifest hook declarations (auto-registered)
 skills/
   socratic/            user-invoked control panel (/socratiskill:socratic)
   socratic-ping/       health probe (/socratiskill:socratic-ping)
@@ -197,14 +282,19 @@ scripts/
   hook-post-turn.sh    Stop hook -> record-turn.ts
   build-context.ts     emits the SOCRATIC CONTEXT block per turn
   record-turn.ts       parses HINT_META, updates session/error-map/antipatterns
+  state-io.ts          atomic writes, O_EXCL locks, schema-validated reads
   detector.ts          heuristics: zero-knowledge, copy-paste, slow-down
   taxonomy.ts          domain classification (7 buckets)
   hint-state.ts        Leitner box state machine
+  antipatterns.ts      regex-based code-smell detector (with ReDoS guards)
   start-teach.ts / end-teach.ts / pick-review.ts / build-journal.ts
-  install.sh / uninstall.sh
+  pause.sh / resume.sh true-bypass toggle (vs the soft `off` silencer)
+  install.sh / install-hooks.sh / uninstall.sh   legacy install path
 data/                  domains, prerequisites, technical terms, antipatterns,
                        roles, algorithm constants
-tests/run-all.sh       18 scenarios, 42 assertions
+tests/
+  run-all.sh           20 scenarios, 54 assertions (functional)
+  run-security.sh      8 scenarios, 40 assertions (adversarial)
 ```
 
 For the full per-turn flow, see [MANUAL-TEST.md](./MANUAL-TEST.md).
