@@ -271,18 +271,19 @@ Two complementary suites — together cover the pedagogical flow AND the
 threat model.
 
 ```bash
-bash tests/run-all.sh         # 21 scenarios, 58 assertions (functional)
+bash tests/run-all.sh         # 21 scenarios, 61 assertions (functional)
 bash tests/run-security.sh    #  8 scenarios, 40 assertions (adversarial)
 # flags for both: --only <N>, --stop-on-fail, --list
 ```
 
 **`run-all.sh`** exercises every script and state transition in
-isolated temp dirs: calibration (including per-level up/down
-thresholds so a novice needs sustained evidence before being nudged
-up), hint escalation, antipatterns, Feynman mode, Leitner spaced
-repetition, journal generation, install/uninstall idempotence, the
-level-1 hard-limits block injection, the pause/resume cycle, and the
-`enabled=false` silencer.
+isolated temp dirs: calibration (per-level up/down thresholds,
+weighted scoring by hint level, topic-diversity floor, and the
+3-turn diagnostic gate the agent must pass before a level-up is
+actually proposed), hint escalation, antipatterns, Feynman mode,
+Leitner spaced repetition, journal generation, install/uninstall
+idempotence, the level-1 hard-limits block injection, the
+pause/resume cycle, and the `enabled=false` silencer.
 
 **`run-security.sh`** runs adversarial tests against the audit guards:
 hostile `STATE_DIR` values to `uninstall.sh` (path traversal, root,
@@ -291,7 +292,7 @@ write under interruption, concurrent RMW on `profile.json`,
 antipattern regex bounds, hostile stdin to the hooks, and topic
 injection (null bytes, RTL unicode, shell metacharacters).
 
-Combined: **98 assertions, all green** as of v0.2.
+Combined: **101 assertions, all green** as of v0.2.
 
 For a manual end-to-end in a live Claude Code session, see
 [MANUAL-TEST.md](./MANUAL-TEST.md).
@@ -324,7 +325,7 @@ scripts/
 data/                  domains, prerequisites, technical terms, antipatterns,
                        roles, algorithm constants
 tests/
-  run-all.sh           21 scenarios, 58 assertions (functional)
+  run-all.sh           21 scenarios, 61 assertions (functional)
   run-security.sh      8 scenarios, 40 assertions (adversarial)
 ```
 

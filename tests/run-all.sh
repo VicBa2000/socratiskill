@@ -477,48 +477,85 @@ if should_run 19; then
   teardown_state "$tmp"
 fi
 
-## S21 per-level calibration thresholds (novices need more evidence)
+## S21 per-level calibration thresholds + diagnostic gate
 if should_run 21; then
-  header "S21 per-level calibration thresholds"
+  header "S21 per-level calibration thresholds + diagnostic gate"
 
-  # 21a — at level 1, 5 correct turns must NOT trigger up-suggestion
+  # 21a — at level 1, 5 correct turns must NOT trigger ANY pending
   tmp=$(setup_state 21)
   node -e 'const fs=require("fs"); const p=process.argv[1]+"/profile.json"; const d=JSON.parse(fs.readFileSync(p,"utf-8")); d.global_level=1; fs.writeFileSync(p,JSON.stringify(d,null,2))' "$tmp"
   for i in 1 2 3 4 5; do
     fire_stop "$tmp" "q$i" "a$i\n\n<!-- HINT_META {\"topic\":\"t$i\",\"correct\":true,\"domain\":\"fundamentos\",\"hintLevel\":0} /HINT_META -->" > /dev/null
   done
-  HAS=$(node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")); process.stdout.write(d.pending_calibration_change?"yes":"no")' "$tmp/profile.json")
-  [[ "$HAS" == "no" ]] && pass "level=1 + 5 correct -> no premature up-suggestion" || fail "S21a level 1 pre-maturely suggested up at 5 correct"
+  HAS=$(node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")); process.stdout.write((d.pending_calibration_change||d.pending_diagnostic)?"yes":"no")' "$tmp/profile.json")
+  [[ "$HAS" == "no" ]] && pass "level=1 + 5 correct -> no premature pending" || fail "S21a level 1 pre-maturely set pending at 5 correct"
   teardown_state "$tmp"
 
-  # 21b — at level 1, 10 correct in a 12-turn window → must suggest up to 2
+  # 21b — at level 1, 10 correct → enters DIAGNOSTIC (not direct promote)
   tmp=$(setup_state 21)
   node -e 'const fs=require("fs"); const p=process.argv[1]+"/profile.json"; const d=JSON.parse(fs.readFileSync(p,"utf-8")); d.global_level=1; fs.writeFileSync(p,JSON.stringify(d,null,2))' "$tmp"
   for i in 1 2 3 4 5 6 7 8 9 10; do
     fire_stop "$tmp" "q$i" "a$i\n\n<!-- HINT_META {\"topic\":\"t$i\",\"correct\":true,\"domain\":\"fundamentos\",\"hintLevel\":0} /HINT_META -->" > /dev/null
   done
-  HAS=$(node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")); const p=d.pending_calibration_change; process.stdout.write(p && p.direction==="up" && p.from===1 && p.to===2 ? "yes" : "no")' "$tmp/profile.json")
-  [[ "$HAS" == "yes" ]] && pass "level=1 + 10 correct -> suggests up to 2" || fail "S21b level 1 did not suggest up at 10 correct"
+  HAS=$(node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")); const p=d.pending_diagnostic; const c=d.pending_calibration_change; process.stdout.write(p && p.target_level===2 && !c ? "yes" : "no")' "$tmp/profile.json")
+  [[ "$HAS" == "yes" ]] && pass "level=1 + 10 correct -> enters diagnostic for L2" || fail "S21b level 1 did not enter diagnostic at 10 correct"
   teardown_state "$tmp"
 
-  # 21c — at level 3, 5 correct DO trigger up (advanced rule: 5/7)
+  # 21c — diagnostic PASS (2/3 pass) → promotes to pending_calibration_change
   tmp=$(setup_state 21)
   node -e 'const fs=require("fs"); const p=process.argv[1]+"/profile.json"; const d=JSON.parse(fs.readFileSync(p,"utf-8")); d.global_level=3; fs.writeFileSync(p,JSON.stringify(d,null,2))' "$tmp"
   for i in 1 2 3 4 5; do
     fire_stop "$tmp" "q$i" "a$i\n\n<!-- HINT_META {\"topic\":\"t$i\",\"correct\":true,\"domain\":\"fundamentos\",\"hintLevel\":0} /HINT_META -->" > /dev/null
   done
-  HAS=$(node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")); const p=d.pending_calibration_change; process.stdout.write(p && p.direction==="up" && p.from===3 && p.to===4 ? "yes" : "no")' "$tmp/profile.json")
-  [[ "$HAS" == "yes" ]] && pass "level=3 + 5 correct -> suggests up to 4" || fail "S21c level 3 did not suggest up at 5 correct"
+  # now in diagnostic; answer 3 diagnostic turns: pass, pass, fail
+  fire_stop "$tmp" "dq1" "da\n\n<!-- HINT_META {\"topic\":\"dt\",\"correct\":true,\"domain\":\"fundamentos\",\"hintLevel\":0,\"diagnostic\":\"pass\"} /HINT_META -->" > /dev/null
+  fire_stop "$tmp" "dq2" "da\n\n<!-- HINT_META {\"topic\":\"dt\",\"correct\":true,\"domain\":\"fundamentos\",\"hintLevel\":0,\"diagnostic\":\"pass\"} /HINT_META -->" > /dev/null
+  fire_stop "$tmp" "dq3" "da\n\n<!-- HINT_META {\"topic\":\"dt\",\"correct\":false,\"domain\":\"fundamentos\",\"hintLevel\":0,\"diagnostic\":\"fail\"} /HINT_META -->" > /dev/null
+  HAS=$(node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")); const c=d.pending_calibration_change; const p=d.pending_diagnostic; process.stdout.write(c && c.direction==="up" && c.to===4 && !p ? "yes" : "no")' "$tmp/profile.json")
+  [[ "$HAS" == "yes" ]] && pass "diagnostic 2/3 pass -> promotes to pending_calibration_change" || fail "S21c diagnostic 2-of-3 did not promote"
   teardown_state "$tmp"
 
-  # 21d — fast downgrade preserved: 3 wrong at level 3 → suggests down to 2
+  # 21d — diagnostic FAIL (1/3 pass) → clears diagnostic, no promotion
+  tmp=$(setup_state 21)
+  node -e 'const fs=require("fs"); const p=process.argv[1]+"/profile.json"; const d=JSON.parse(fs.readFileSync(p,"utf-8")); d.global_level=3; fs.writeFileSync(p,JSON.stringify(d,null,2))' "$tmp"
+  for i in 1 2 3 4 5; do
+    fire_stop "$tmp" "q$i" "a$i\n\n<!-- HINT_META {\"topic\":\"t$i\",\"correct\":true,\"domain\":\"fundamentos\",\"hintLevel\":0} /HINT_META -->" > /dev/null
+  done
+  fire_stop "$tmp" "dq1" "da\n\n<!-- HINT_META {\"topic\":\"dt\",\"correct\":false,\"domain\":\"fundamentos\",\"hintLevel\":0,\"diagnostic\":\"fail\"} /HINT_META -->" > /dev/null
+  fire_stop "$tmp" "dq2" "da\n\n<!-- HINT_META {\"topic\":\"dt\",\"correct\":true,\"domain\":\"fundamentos\",\"hintLevel\":0,\"diagnostic\":\"pass\"} /HINT_META -->" > /dev/null
+  fire_stop "$tmp" "dq3" "da\n\n<!-- HINT_META {\"topic\":\"dt\",\"correct\":false,\"domain\":\"fundamentos\",\"hintLevel\":0,\"diagnostic\":\"fail\"} /HINT_META -->" > /dev/null
+  HAS=$(node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")); const c=d.pending_calibration_change; const p=d.pending_diagnostic; process.stdout.write(!c && !p ? "yes" : "no")' "$tmp/profile.json")
+  [[ "$HAS" == "yes" ]] && pass "diagnostic 1/3 pass -> clears, no promotion" || fail "S21d diagnostic 1-of-3 still left state"
+  teardown_state "$tmp"
+
+  # 21e — fast downgrade preserved (3 wrong → direct pending_calibration_change)
   tmp=$(setup_state 21)
   node -e 'const fs=require("fs"); const p=process.argv[1]+"/profile.json"; const d=JSON.parse(fs.readFileSync(p,"utf-8")); d.global_level=3; fs.writeFileSync(p,JSON.stringify(d,null,2))' "$tmp"
   for i in 1 2 3; do
     fire_stop "$tmp" "q$i" "a$i\n\n<!-- HINT_META {\"topic\":\"t$i\",\"correct\":false,\"domain\":\"fundamentos\",\"hintLevel\":0} /HINT_META -->" > /dev/null
   done
   HAS=$(node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")); const p=d.pending_calibration_change; process.stdout.write(p && p.direction==="down" && p.from===3 && p.to===2 ? "yes" : "no")' "$tmp/profile.json")
-  [[ "$HAS" == "yes" ]] && pass "level=3 + 3 wrong -> fast downgrade to 2" || fail "S21d level 3 did not downgrade at 3 wrong"
+  [[ "$HAS" == "yes" ]] && pass "level=3 + 3 wrong -> direct downgrade to 2 (no diagnostic)" || fail "S21e level 3 did not directly downgrade at 3 wrong"
+  teardown_state "$tmp"
+
+  # 21f — weighted scoring blocks: 10 correct at hintLevel 5 (full scaffolding) → no diagnostic
+  tmp=$(setup_state 21)
+  node -e 'const fs=require("fs"); const p=process.argv[1]+"/profile.json"; const d=JSON.parse(fs.readFileSync(p,"utf-8")); d.global_level=1; fs.writeFileSync(p,JSON.stringify(d,null,2))' "$tmp"
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    fire_stop "$tmp" "q$i" "a$i\n\n<!-- HINT_META {\"topic\":\"t$i\",\"correct\":true,\"domain\":\"fundamentos\",\"hintLevel\":5} /HINT_META -->" > /dev/null
+  done
+  HAS=$(node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")); process.stdout.write((d.pending_diagnostic||d.pending_calibration_change)?"yes":"no")' "$tmp/profile.json")
+  [[ "$HAS" == "no" ]] && pass "10 correct at hintLevel 5 -> no diagnostic (avg weight too low)" || fail "S21f scaffolded correctness pre-maturely promoted"
+  teardown_state "$tmp"
+
+  # 21g — topic diversity blocks: 10 correct on ONE topic → no diagnostic
+  tmp=$(setup_state 21)
+  node -e 'const fs=require("fs"); const p=process.argv[1]+"/profile.json"; const d=JSON.parse(fs.readFileSync(p,"utf-8")); d.global_level=1; fs.writeFileSync(p,JSON.stringify(d,null,2))' "$tmp"
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    fire_stop "$tmp" "q$i" "a$i\n\n<!-- HINT_META {\"topic\":\"single-topic\",\"correct\":true,\"domain\":\"fundamentos\",\"hintLevel\":0} /HINT_META -->" > /dev/null
+  done
+  HAS=$(node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")); process.stdout.write((d.pending_diagnostic||d.pending_calibration_change)?"yes":"no")' "$tmp/profile.json")
+  [[ "$HAS" == "no" ]] && pass "10 correct on ONE topic -> no diagnostic (diversity floor)" || fail "S21g single-topic correctness pre-maturely promoted"
   teardown_state "$tmp"
 fi
 

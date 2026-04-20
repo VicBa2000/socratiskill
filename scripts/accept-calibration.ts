@@ -72,6 +72,8 @@ function main(): void {
     newLevel = HintState.clampUserLevel(Number(pending.to))
     profile["global_level"] = newLevel
     delete profile["pending_calibration_change"]
+    // Clear any stale diagnostic — it belongs to the previous level.
+    delete profile["pending_diagnostic"]
     writeJson(profilePath, profile)
   })
 

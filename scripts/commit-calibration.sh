@@ -63,6 +63,9 @@ node -e "
   p.global_level = level;
   p.calibration_completed = true;
   p.calibration_date = new Date().toISOString();
+  // Manual level change invalidates any in-flight diagnostic.
+  delete p.pending_diagnostic;
+  delete p.pending_calibration_change;
   fs.writeFileSync(path, JSON.stringify(p, null, 2) + '\n');
   console.log('committed: level=' + level + ' at ' + p.calibration_date);
 " "${PROFILE_PATH}" "${LEVEL}"

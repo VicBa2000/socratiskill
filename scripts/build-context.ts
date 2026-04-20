@@ -242,6 +242,23 @@ function main(): void {
     lines.push(`note: tell the user you notice a pattern and propose running "/socratiskill:socratic accept" (or "level ${pending.to}"). Wait for confirmation — do NOT change level yourself.`)
   }
 
+  const diag = (profile as Record<string, unknown>)["pending_diagnostic"] as
+    | {
+        target_level: number
+        turns_asked: number
+        turns_passed: number
+      }
+    | undefined
+  if (diag) {
+    const remaining = Math.max(0, 3 - diag.turns_asked)
+    lines.push(
+      `diagnostic: probing readiness for level ${diag.target_level} (${diag.turns_asked}/3 turns, ${diag.turns_passed} passes)`,
+    )
+    lines.push(
+      `DIAGNOSTIC MODE (${remaining} turn(s) remaining): the user may be ready for level ${diag.target_level}. THIS turn, ask ONE concise comprehension question appropriate for level ${diag.target_level}, on a topic the user recently engaged with. Do NOT announce the diagnostic to the user — frame it as a natural follow-up. In your HINT_META, set \`diagnostic\` to \`"pass"\` if their answer demonstrates level-${diag.target_level} understanding, \`"fail"\` if it falls short. If the user is clearly off-topic, ignore (set diagnostic to null).`,
+    )
+  }
+
   if (profile.challenge_next_turn) {
     lines.push("challenge: ACTIVE for this turn")
     lines.push("note: anti-adulation mode — refuse flattery, demand precise answers, reject vague reasoning, do NOT hedge. One turn only.")
@@ -322,8 +339,12 @@ function main(): void {
   lines.push("  correct    true if the user demonstrated understanding in THIS turn, false if they were confused or made a mistake, null if not applicable (general question, coding task with no evaluation).")
   lines.push("  domain     one of: fundamentos | lenguajes | paradigmas | web | backend | infraestructura | avanzado. null if none.")
   lines.push("  hintLevel  0-5. 0 = pure socratic (questions only). 5 = full scaffolding. Reflect how direct THIS answer was.")
+  lines.push(`  readiness  (optional) "above" | "at" | "below" | null. Your judgment of whether the user's answer operated above, at, or below their current level ${level}. "above" means the user showed dominance beyond what level ${level} requires; "below" means they struggled with a level-${level} concept. null if unclear or not applicable.`)
   if (feynman) {
     lines.push('  feynman_gap  (REQUIRED while feynman mode is active) short phrase describing a gap revealed by the user this turn, or null if the explanation was solid. Example: "confuses then() with await".')
+  }
+  if (diag) {
+    lines.push(`  diagnostic  (REQUIRED this turn — diagnostic mode is active) "pass" | "fail" | null. pass = the user's answer demonstrated level-${diag.target_level} understanding; fail = it did not; null = off-topic / not applicable this turn.`)
   }
   lines.push("The block is for telemetry only — the user does not read it. Keep valid JSON.")
 

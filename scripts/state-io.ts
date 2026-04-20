@@ -220,6 +220,8 @@ export namespace StateIO {
     accompanied?: unknown
     reason?: unknown
     feynman_gap?: unknown
+    readiness?: unknown
+    diagnostic?: unknown
   }> = (x): x is {
     topic?: unknown
     correct?: unknown
@@ -228,9 +230,15 @@ export namespace StateIO {
     accompanied?: unknown
     reason?: unknown
     feynman_gap?: unknown
+    readiness?: unknown
+    diagnostic?: unknown
   } => {
     if (!isObject(x)) return false
-    const known = ["topic", "correct", "domain", "hintLevel", "accompanied", "reason", "feynman_gap"]
+    const known = [
+      "topic", "correct", "domain", "hintLevel",
+      "accompanied", "reason", "feynman_gap",
+      "readiness", "diagnostic",
+    ]
     return known.some((k) => k in x)
   }
 }

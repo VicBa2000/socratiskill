@@ -72,6 +72,8 @@ interface TurnRecord {
   agent_excerpt: string | null
   accompanied: boolean
   reason: string | null
+  readiness: "above" | "at" | "below" | null
+  diagnostic: "pass" | "fail" | null
 }
 
 interface ErrorMapEntry {
@@ -139,6 +141,18 @@ interface PendingCalibration {
   suggested_at: string
   window_end_turn: number
 }
+
+interface PendingDiagnostic {
+  target_level: number
+  started_turn: number
+  turns_asked: number
+  turns_passed: number
+  suggested_at: string
+}
+
+const DIAGNOSTIC_TURNS_REQUIRED = 3
+const DIAGNOSTIC_PASSES_REQUIRED = 2
+const MIN_WEIGHTED_AVG_FOR_UP = 0.4
 
 function stateDir(): string {
   return process.env["SOCRATIC_STATE_DIR"] ?? join(homedir(), ".claude", "socratic")
@@ -263,6 +277,20 @@ function writeSessionDoc(doc: SessionDoc): void {
   writeJson(p, doc)
 }
 
+/**
+ * Weight of a correct answer as evidence of readiness. A correct answer at
+ * hint level 0 (pure socratic, no scaffolding) is strong evidence; one at
+ * hint level 5 (full scaffolding) is weak. Readiness self-report from the
+ * agent shifts the weight up/down by ~25%. Never below 0, never above 1.
+ */
+function turnWeight(hintLevel: number, readiness: TurnRecord["readiness"]): number {
+  const lvl = Math.max(0, Math.min(5, hintLevel))
+  let base = (5 - lvl) / 5
+  if (readiness === "above") base = Math.min(1, base + 0.25)
+  else if (readiness === "below") base = Math.max(0, base - 0.25)
+  return base
+}
+
 function evaluateCalibration(
   doc: SessionDoc,
   userLevel: number,
@@ -284,13 +312,30 @@ function evaluateCalibration(
     const needed = upRule.correct_required ?? Math.ceil(upRule.window * 0.6)
     const window = evaluated.slice(-upRule.window)
     if (window.length >= needed) {
-      const correctCount = window.filter((t) => t.correct === true).length
+      const correctTurns = window.filter((t) => t.correct === true)
+      const correctCount = correctTurns.length
       if (correctCount >= needed) {
+        // Weighted scoring: average the per-turn weight of the correct
+        // answers. Guards against "10 correct answers with full scaffolding".
+        const weights = correctTurns.map((t) => turnWeight(t.hint_level, t.readiness))
+        const avgWeight = weights.reduce((a, b) => a + b, 0) / weights.length
+        // Topic diversity: require breadth. 10 correct on one topic is not
+        // evidence of level-up readiness.
+        const distinctTopics = new Set(
+          correctTurns.map((t) => t.topic ?? "__none__"),
+        )
+        const minTopics = Math.max(1, Math.ceil(needed / 2))
+
+        if (avgWeight < MIN_WEIGHTED_AVG_FOR_UP) return null
+        if (distinctTopics.size < minTopics) return null
+
         return {
           direction: "up",
           from: userLevel,
           to: userLevel + 1,
-          reason: `${correctCount}/${window.length} correct (needs ${needed}/${upRule.window} at L${userLevel})`,
+          reason:
+            `${correctCount}/${window.length} correct at L${userLevel} ` +
+            `(avg weight ${avgWeight.toFixed(2)}, ${distinctTopics.size} topics)`,
           suggested_at: new Date().toISOString(),
           window_end_turn: currentTurn,
         }
@@ -395,6 +440,15 @@ function main(): void {
     .trim()
   const { level } = loadProfile()
 
+  const readinessRaw = typeof meta?.readiness === "string" ? meta.readiness : null
+  const readiness: TurnRecord["readiness"] =
+    readinessRaw === "above" || readinessRaw === "at" || readinessRaw === "below"
+      ? readinessRaw
+      : null
+  const diagnosticRaw = typeof meta?.diagnostic === "string" ? meta.diagnostic : null
+  const diagnostic: TurnRecord["diagnostic"] =
+    diagnosticRaw === "pass" || diagnosticRaw === "fail" ? diagnosticRaw : null
+
   const record: TurnRecord = {
     ts: new Date().toISOString(),
     session_id: sessionId,
@@ -408,6 +462,8 @@ function main(): void {
     agent_excerpt: cleanedAgent ? truncate(cleanedAgent, 200) : null,
     accompanied: Boolean(meta?.accompanied),
     reason: meta?.reason ?? null,
+    readiness,
+    diagnostic,
   }
 
   const doc = loadSessionDoc()
@@ -433,9 +489,6 @@ function main(): void {
     doc.hint_state = HintState.processResponse(doc.hint_state, record.correct, false)
   }
 
-  const pending = evaluateCalibration(doc, level, record.turn_index)
-  if (pending) doc.last_calibration_eval_turn = record.turn_index
-
   writeSessionDoc(doc)
   if (meta) updateErrorMap(meta)
   Antipatterns.recordTurn(userText, agentText, new Date())
@@ -448,7 +501,73 @@ function main(): void {
     const profile = readJson<Record<string, unknown>>(profilePath, {})
     profile["last_active"] = new Date().toISOString()
     profile["last_user_message_length"] = userText.length
-    if (pending) profile["pending_calibration_change"] = pending
+
+    // Diagnostic gate state machine.
+    //
+    // Phase A (no pending): if evaluateCalibration triggers on "up", we
+    // don't promote directly — we enter diagnostic mode and let the agent
+    // probe the user with targeted questions over the next few turns.
+    // "down" still promotes directly (stuck-above-level is worse than a
+    // false downgrade).
+    //
+    // Phase B (pending_diagnostic set): we count turns and pass/fail
+    // signals from HINT_META.diagnostic. After DIAGNOSTIC_TURNS_REQUIRED
+    // turns, we either promote to pending_calibration_change (>= 2
+    // passes) or clear.
+    //
+    // User-level changes (manual /level N or /accept) during diagnostic
+    // clear it: the target is no longer meaningful.
+    const existingDiag = profile["pending_diagnostic"] as PendingDiagnostic | undefined
+    if (existingDiag && existingDiag.target_level !== level + 1 && existingDiag.target_level !== level) {
+      delete profile["pending_diagnostic"]
+    }
+
+    const activeDiag = profile["pending_diagnostic"] as PendingDiagnostic | undefined
+
+    if (activeDiag) {
+      const turnsSinceStart = record.turn_index - activeDiag.started_turn
+      if (turnsSinceStart > 0) {
+        activeDiag.turns_asked += 1
+        if (record.diagnostic === "pass") activeDiag.turns_passed += 1
+      }
+      if (activeDiag.turns_asked >= DIAGNOSTIC_TURNS_REQUIRED) {
+        if (activeDiag.turns_passed >= DIAGNOSTIC_PASSES_REQUIRED) {
+          profile["pending_calibration_change"] = {
+            direction: "up",
+            from: level,
+            to: activeDiag.target_level,
+            reason: `diagnostic pass: ${activeDiag.turns_passed}/${activeDiag.turns_asked} at L${activeDiag.target_level}`,
+            suggested_at: new Date().toISOString(),
+            window_end_turn: record.turn_index,
+          }
+        }
+        delete profile["pending_diagnostic"]
+        doc.last_calibration_eval_turn = record.turn_index
+        writeSessionDoc(doc)
+      } else {
+        profile["pending_diagnostic"] = activeDiag
+      }
+    } else {
+      const pending = evaluateCalibration(doc, level, record.turn_index)
+      if (pending) {
+        doc.last_calibration_eval_turn = record.turn_index
+        writeSessionDoc(doc)
+        if (pending.direction === "down") {
+          profile["pending_calibration_change"] = pending
+        } else {
+          // up: enter diagnostic gate instead of promoting directly
+          const diag: PendingDiagnostic = {
+            target_level: pending.to,
+            started_turn: record.turn_index,
+            turns_asked: 0,
+            turns_passed: 0,
+            suggested_at: new Date().toISOString(),
+          }
+          profile["pending_diagnostic"] = diag
+        }
+      }
+    }
+
     writeJson(profilePath, profile)
   })
 }
