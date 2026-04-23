@@ -152,7 +152,14 @@ interface PendingDiagnostic {
 
 const DIAGNOSTIC_TURNS_REQUIRED = 3
 const DIAGNOSTIC_PASSES_REQUIRED = 2
-const MIN_WEIGHTED_AVG_FOR_UP = 0.4
+// Weight threshold for up-leveling. Correct answers are weighted by
+// (5 - hintLevel)/5 ± 0.25 by readiness. 0.5 means the average correct
+// must be equivalent to hint <= 2.5 (analogy or lower) — i.e. genuine
+// socratic-leaning performance, not obedience under heavy scaffolding.
+const MIN_WEIGHTED_AVG_FOR_UP = 0.5
+// Depth diversity floor: hintLevel <= this counts as "low scaffolding".
+// Used to prevent "correct always with medium-high hints" from promoting.
+const LOW_HINT_THRESHOLD = 2
 
 function stateDir(): string {
   return process.env["SOCRATIC_STATE_DIR"] ?? join(homedir(), ".claude", "socratic")
@@ -325,9 +332,18 @@ function evaluateCalibration(
           correctTurns.map((t) => t.topic ?? "__none__"),
         )
         const minTopics = Math.max(1, Math.ceil(needed / 2))
+        // Depth diversity: a correct answer counts as low-scaffolding
+        // evidence only when hint_level <= LOW_HINT_THRESHOLD. At least
+        // half of the correct answers must clear that bar. Without this,
+        // a user who only ever answers with heavy hints (4-5) can still
+        // accumulate enough correct count to trigger UP, which is
+        // obedience under scaffolding, not dominion of the material.
+        const lowHintCount = correctTurns.filter((t) => t.hint_level <= LOW_HINT_THRESHOLD).length
+        const minLowHint = Math.max(1, Math.ceil(needed / 2))
 
         if (avgWeight < MIN_WEIGHTED_AVG_FOR_UP) return null
         if (distinctTopics.size < minTopics) return null
+        if (lowHintCount < minLowHint) return null
 
         return {
           direction: "up",
@@ -335,7 +351,8 @@ function evaluateCalibration(
           to: userLevel + 1,
           reason:
             `${correctCount}/${window.length} correct at L${userLevel} ` +
-            `(avg weight ${avgWeight.toFixed(2)}, ${distinctTopics.size} topics)`,
+            `(avg weight ${avgWeight.toFixed(2)}, ${distinctTopics.size} topics, ` +
+            `${lowHintCount} low-hint)`,
           suggested_at: new Date().toISOString(),
           window_end_turn: currentTurn,
         }

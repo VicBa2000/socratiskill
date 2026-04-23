@@ -17,8 +17,8 @@ an intermediate starts at 0 (pure socratic).
 |------------|------------------|--------------|
 | 1          | Live teacher     | 5            |
 | 2          | Active guide     | 4            |
-| 3          | Pair programmer  | 0            |
-| 4          | Code reviewer    | 0            |
+| 3          | Pair programmer  | 2            |
+| 4          | Code reviewer    | 1            |
 | 5          | Silent colleague | 0            |
 
 ## Escalation / de-escalation dynamics

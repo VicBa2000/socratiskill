@@ -45,9 +45,9 @@ export namespace HintState {
       case 2:
         return 4
       case 3:
-        return 0
+        return 2
       case 4:
-        return 0
+        return 1
       case 5:
         return 0
     }

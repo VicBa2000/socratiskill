@@ -215,12 +215,44 @@
     /socratiskill:socratic mode learn       -> prioritize teaching
     /socratiskill:socratic mode productive  -> prioritize speed
 
-    Levels 1..5 in short:
-      1 Novice        Live teacher        — explains everything
-      2 Basic         Teacher with context — explains the why
-      3 Intermediate  Pair programmer      — asks before writing
-      4 Advanced      Code reviewer        — challenges decisions
-      5 Expert        Silent colleague     — only flags real issues
+    Levels 1..5 in short (canonical behavior — enforced via a
+    per-level protocol block injected on every turn for L1-L4):
+
+      1 Novice        Live teacher
+          Restate → plan → teach → ONE comprehension question.
+          END turn, wait for approval. MAX 30 lines / 1 file per
+          turn. No Write/Edit without explicit approval THIS turn.
+          Starts at hint level 5 (full scaffolding).
+
+      2 Basic         Teacher with context
+          Explains the WHY of every non-trivial decision. One
+          comprehension question after each new block. Block-by-
+          block, not line-by-line.
+          Starts at hint level 4 (explanation + verification).
+
+      3 Intermediate  Pair programmer
+          Asks "what approach do you have in mind?" before non-
+          trivial implementations. Gapped code (___) in at least
+          one spot per turn. Trivial edits go direct.
+          Starts at hint level 2 (analogy).
+
+      4 Advanced      Code reviewer
+          Raises at least ONE challenge as a question before
+          accepting a proposal: edge case, security, scalability,
+          or alternative. No explanations of basics.
+          Starts at hint level 1 (orientation).
+
+      5 Expert        Silent colleague
+          Pure code assistant. Intervenes only for real issues
+          (vulnerability, serious bug, anti-pattern, significantly
+          better alternative). No pedagogical injection.
+          Starts at hint level 0 (pure socratic).
+
+    In `mode productive`, the L2-L4 protocols are attenuated: L2
+    uses a single WHY sentence, L3 drops the approach preamble
+    and gapped code, L4 flags only critical issues briefly. L1
+    is the same in both modes — its hard limits are not
+    negotiable.
 
   ------------------------------------------------------------------
   2.4 ASK FOR MORE / LESS GUIDANCE DURING A CONVERSATION
@@ -280,13 +312,37 @@
   ------------------------------------------------------------------
   2.8 ACCEPT A CALIBRATION SUGGESTION
   ------------------------------------------------------------------
-    After 3+ correct or 3+ wrong answers in a 5-turn window, the
-    mentor suggests adjusting your level. When you see "calibration:
-    suggest level X -> Y" in context, run:
+    The level-up pipeline is intentionally conservative to avoid
+    premature / sycophantic promotions. In order, to climb from
+    level X to level X+1 you need:
 
-    /socratiskill:socratic accept
+      1. Per-level threshold of correct answers in a window:
+           L1 -> 10/12   L2 -> 7/9   L3 -> 5/7   L4 -> 5/7
+      2. Weighted average of those correct answers >= 0.5,
+         where each correct is weighted by (5 - hintLevel)/5.
+         Scaffolded correctness carries low weight on purpose.
+      3. Topic diversity: at least ceil(needed/2) distinct topics.
+      4. Depth diversity: at least ceil(needed/2) of the correct
+         answers must have been with hintLevel <= 2 (analogy or
+         lower scaffolding).
+      5. A 3-turn diagnostic quiz: the mentor quietly inserts
+         comprehension questions at the next level in the flow.
+         You must pass >= 2/3. During this quiz an anti-adulation
+         instruction is active: vague or hand-wavy answers are
+         graded as FAIL, not pass.
 
-    This applies the change and resets the session's hint counters.
+    Only after all of the above does the mentor surface "calibration:
+    suggest level X -> Y" in context. Run:
+
+      /socratiskill:socratic accept
+
+    This applies the change and resets the session's hint state
+    to the new level's initial value. You can also bypass the
+    pipeline entirely with `/socratiskill:socratic level N`.
+
+    Downgrades do NOT require a diagnostic — they apply directly
+    after 3 wrong answers in 5 turns, because being stuck above
+    your level is worse than a false downgrade.
 
 
 ================================================================================
@@ -500,8 +556,10 @@
 
   README.md            overview, architecture, robustness invariants,
                        limitations
+  sistemas.txt         full technical reference — every rule, threshold,
+                       state file, hook, detector, protocol block
   MANUAL-TEST.md       step-by-step end-to-end test plan (7 scenarios)
-  tests/run-all.sh     functional test suite (22 scenarios, 69 assertions)
+  tests/run-all.sh     functional test suite (23 scenarios, 90 assertions)
   tests/run-security.sh adversarial test suite (8 scenarios, 40 asserts)
   hooks/hooks.json     plugin manifest hook declarations
   CLAUDE.md            contributor-oriented technical notes

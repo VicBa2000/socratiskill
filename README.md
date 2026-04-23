@@ -7,7 +7,7 @@
     ╚══════╝ ╚═════╝  ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝   ╚═╝╚══════╝╚═╝  ╚═╝╚═╝╚══════╝╚══════╝
     ──────────────────────────────────────────────────────────────────────────────────────
     ░▒▓█   A D A P T I V E   S O C R A T I C   M E N T O R   F O R   C L A U D E   █▓▒░
-                       >>  v0.2 · MIT · github.com/VicBa2000/socratiskill  <<
+                       >>  v0.3 · MIT · github.com/VicBa2000/socratiskill  <<
 ```
 
 # Socratiskill
@@ -188,9 +188,9 @@ manifest".
    slow-down, domain taxonomy) + error-map (Leitner due) + antipattern
    state + feynman state from the session file. Emits a
    `SOCRATIC CONTEXT` block to stdout. Claude Code injects it into the
-   model context as a `system-reminder`. At level 1, the block also
-   includes a `LEVEL 1 HARD LIMITS` reinforcement (max 30 lines per
-   turn, max 1 file, mandatory restate→plan→teach→verify protocol).
+   model context as a `system-reminder`. The block also includes a
+   **per-level protocol reinforcement** calibrated to the current
+   level and mode (see "Per-level protocols" below).
 2. **`Stop` hook** -> runs `scripts/record-turn.ts`, which parses the
    transcript, extracts the HINT_META (emitted as an HTML comment,
    invisible to the user), and updates the session file + error-map +
@@ -201,6 +201,69 @@ manifest".
    every project regardless of project-local `.claude/settings.json`.
 4. **Skills** -> `/socratiskill:socratic` (user-invoked) is the
    control panel; `/socratiskill:socratic-ping` is a health probe.
+
+### Per-level protocols
+
+Each user level has a **canonical behavior** that the model should
+exhibit reliably, independently of the soft markdown rules. Since
+soft sentences can drift against the system prompt's pull toward
+"be helpful, complete tasks", an imperative protocol block is
+injected at the end of every `SOCRATIC CONTEXT` block for L1-L4,
+calibrated to the level's role and attenuated by `mode`. L5 (silent
+colleague) gets no injection — it is the default Claude Code
+behavior.
+
+| Level | Role                  | Initial hint | Canonical behavior (learn) |
+|-------|-----------------------|--------------|----------------------------|
+| L1    | Live teacher          | 5            | Restate → plan → teach → ONE comprehension question. END turn. MAX 30 lines / 1 file per turn. No Write/Edit without explicit approval in THIS turn. |
+| L2    | Teacher with context  | 4            | Before non-trivial decisions, state the WHY in 1-2 sentences. After each new block, ONE comprehension question. Block-by-block, never line-by-line. |
+| L3    | Pair programmer       | 2            | "What approach do you have in mind?" before non-trivial implementations. Gapped code (`___`) in at least one spot per turn. Gaps raised as questions, not corrections. |
+| L4    | Code reviewer         | 1            | Before accepting a proposal, raise at least ONE challenge as a question: edge case, security, scalability, or alternative. No explanations of basics. |
+| L5    | Silent colleague      | 0            | Pure code assistant. Intervenes only for vulnerabilities, serious bugs, anti-patterns, or significantly better alternatives. |
+
+In `productive` mode, the L2-L4 blocks are attenuated: L2 drops to
+one WHY sentence per non-obvious decision; L3 skips the approach
+preamble and gapped code; L4 flags only critical issues as brief
+questions.
+
+### Calibration and anti-adulation gates
+
+Level-up is gated by a pipeline designed to prevent optimistic /
+sycophantic promotion:
+
+- **Per-level thresholds** (from `data/algorithm.json`): L1 needs
+  10 correct in a window of 12; L2 7/9; L3 and L4 each 5/7. Down
+  is uniform 3/5.
+- **Weighted scoring**: each correct answer is weighted
+  `(5 - hintLevel) / 5`, adjusted ±0.25 by the model's `readiness`
+  self-report. The average must be ≥ **0.5** — equivalent to hints
+  no heavier than analogy-level. "10 correct answers with full
+  scaffolding" is obedience, not dominion; it is blocked.
+- **Topic diversity floor**: at least `ceil(needed/2)` distinct
+  topics in the window. 10 correct answers on the same topic do
+  not count as readiness.
+- **Depth diversity floor**: at least `ceil(needed/2)` of the
+  correct answers must have been answered with `hintLevel ≤ 2`.
+  This blocks the case where the model always gives heavy hints
+  because it perceives the user as a novice.
+- **Diagnostic gate**: if all of the above pass, the system does
+  NOT promote directly. It enters a 3-turn diagnostic quiz where
+  the model inserts comprehension questions targeted at the
+  next level, masked as natural follow-ups. The user must pass
+  at least 2/3. During the diagnostic, an explicit
+  **ANTI-ADULATION** instruction is injected that tells the
+  grader to treat vague / partial / hand-wavy answers as FAIL and
+  to default to FAIL on ambiguity.
+- **Down-leveling bypasses the diagnostic** — being stuck above
+  your level is worse than a false downgrade.
+
+Only after the diagnostic passes does `pending_calibration_change`
+appear, and the system nudges the user to run
+`/socratiskill:socratic accept`. **The system never changes the
+level on its own.**
+
+For the full technical reference of every system (rules, thresholds,
+state files, hook contents), see [sistemas.txt](./sistemas.txt).
 
 ### Robustness invariants
 
@@ -336,19 +399,20 @@ Two complementary suites — together cover the pedagogical flow AND the
 threat model.
 
 ```bash
-bash tests/run-all.sh         # 22 scenarios, 69 assertions (functional)
+bash tests/run-all.sh         # 23 scenarios, 90 assertions (functional)
 bash tests/run-security.sh    #  8 scenarios, 40 assertions (adversarial)
 # flags for both: --only <N>, --stop-on-fail, --list
 ```
 
 **`run-all.sh`** exercises every script and state transition in
 isolated temp dirs: calibration (per-level up/down thresholds,
-weighted scoring by hint level, topic-diversity floor, and the
-3-turn diagnostic gate the agent must pass before a level-up is
-actually proposed), hint escalation, antipatterns, Feynman mode,
-Leitner spaced repetition, journal generation, install/uninstall
-idempotence, the level-1 hard-limits block injection, the
-pause/resume cycle, and the `enabled=false` silencer.
+weighted scoring by hint level, topic-diversity floor, depth-
+diversity floor, the 3-turn diagnostic gate, and the anti-
+adulation injection during the diagnostic), hint escalation,
+per-level protocol blocks for L1-L4 across both `learn` and
+`productive` modes, antipatterns, Feynman mode, Leitner spaced
+repetition, journal generation, install/uninstall idempotence,
+the pause/resume cycle, and the `enabled=false` silencer.
 
 **`run-security.sh`** runs adversarial tests against the audit guards:
 hostile `STATE_DIR` values to `uninstall.sh` (path traversal, root,
@@ -357,7 +421,7 @@ write under interruption, concurrent RMW on `profile.json`,
 antipattern regex bounds, hostile stdin to the hooks, and topic
 injection (null bytes, RTL unicode, shell metacharacters).
 
-Combined: **109 assertions, all green** as of v0.2.
+Combined: **130 assertions, all green** as of v0.3.
 
 For a manual end-to-end in a live Claude Code session, see
 [MANUAL-TEST.md](./MANUAL-TEST.md).
@@ -390,11 +454,14 @@ scripts/
 data/                  domains, prerequisites, technical terms, antipatterns,
                        roles, algorithm constants
 tests/
-  run-all.sh           22 scenarios, 69 assertions (functional)
+  run-all.sh           23 scenarios, 90 assertions (functional)
   run-security.sh      8 scenarios, 40 assertions (adversarial)
+sistemas.txt           full technical reference (rules, thresholds,
+                       state files, hooks, every system)
 ```
 
 For the full per-turn flow, see [MANUAL-TEST.md](./MANUAL-TEST.md).
+For the full technical reference, see [sistemas.txt](./sistemas.txt).
 
 ---
 

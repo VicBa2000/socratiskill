@@ -1,6 +1,6 @@
 # Socratiskill — manual E2E test plan
 
-Seven scenarios (+ one sanity check) to validate the plugin in a clean
+Eight scenarios (+ one sanity check) to validate the plugin in a clean
 install before release. Each test is marked PASS if the observed result
 matches the expected one.
 
@@ -53,19 +53,23 @@ matches the expected one.
 **Goal**: two consecutive wrong answers about the same topic raise
 the hint_level.
 
-1. `/socratiskill:socratic` -> confirm current level (e.g. 3, base hint=0).
+1. `/socratiskill:socratic` -> confirm current level (e.g. 3, base
+   hint=2 — see the "Initial hint level per user level" table in
+   `skills/socratic/rules/hint-ladder.md`: L1=5, L2=4, L3=2, L4=1,
+   L5=0).
 2. Start a technical conversation where you answer the same topic
    wrong twice on purpose (e.g. "difference between map and forEach?"
    -> give a wrong answer twice). The model should close each turn
    with HINT_META `correct:false` on the same topic.
 3. On the third turn, ask another question on the same topic.
    **Expected**: the `SOCRATIC CONTEXT` block (visible only if you
-   inspect it in debug mode) shows `hint: 1+ (...)` — it went up.
+   inspect it in debug mode) shows a hint level one step above the
+   initial — for L3 that is `hint: 3 (...)` after two wrong turns.
    Easy behavioral check: the model's response style becomes more
    direct (scaffolding increases).
 4. Inspect `~/.claude/socratic/sessions/<date>.json`:
    - `hint_state.consecutiveFailures >= 1`
-   - `hint_state.currentLevel >= 1`
+   - `hint_state.currentLevel >` the initial value for your level.
 
 ---
 
@@ -211,6 +215,47 @@ restores it without losing state.
    ```bash
    ls ~/.claude/socratic/
    ```
+
+---
+
+## Scenario 8 — Per-level protocol block is injected and mode-sensitive
+
+**Goal**: for L1-L4 the `SOCRATIC CONTEXT` block contains a
+per-level protocol reinforcement; for L5 it does not. The
+L2-L4 blocks change between `learn` and `productive`.
+
+> Prerequisite: you can inspect the hook stdout. If your Claude
+> Code build does not surface it, run the hook directly:
+> ```bash
+> echo '{"prompt":"test","hook_event_name":"UserPromptSubmit"}' | \
+>   bash scripts/hook-pre-prompt.sh
+> ```
+
+1. `/socratiskill:socratic level 1` then fire a prompt.
+   **Expected**: the block contains the line
+   `--- LEVEL 1 HARD LIMITS (critical, not optional) ---`.
+2. `/socratiskill:socratic level 2` + `mode learn` + fire a prompt.
+   **Expected**: `--- LEVEL 2 PROTOCOL (learn, active) ---` +
+   a rule about stating the WHY before non-trivial decisions.
+3. `/socratiskill:socratic mode productive` (staying at L2).
+   **Expected**: `--- LEVEL 2 PROTOCOL (productive, active) ---`
+   with the attenuated version — no "comprehension question after
+   each new block" rule.
+4. Repeat for L3 and L4, switching between `learn` and `productive`.
+   L3 `learn` must include "¿Qué enfoque tenés en mente?" and
+   "gapped code". L3 `productive` must state "No gapped code" and
+   "No preamble". L4 `learn` requires at least ONE challenge; L4
+   `productive` flags only critical issues.
+5. `/socratiskill:socratic level 5` + fire a prompt.
+   **Expected**: NO `LEVEL N PROTOCOL` block. L5 is the silent
+   colleague — default Claude Code behavior with only the
+   telemetry footer.
+6. Verify there is no leak:
+   ```bash
+   grep -c "LEVEL [1-5] " <(bash scripts/hook-pre-prompt.sh < ...)
+   ```
+   Each prompt should emit exactly 0 (at L5) or 1 (at L1-L4)
+   protocol blocks — never 2.
 
 ---
 

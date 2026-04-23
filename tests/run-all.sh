@@ -179,11 +179,13 @@ fi
 if should_run 4; then
   header "S4 hint-state"
   tmp=$(setup_state 4)
-  # fail twice -> should ascend once (from 0 to 1)
+  # setup_state defaults to global_level=3 -> getInitialHintLevel(3) = 2.
+  # Two fails -> ascend once (2 -> 3). The test checks the ascension
+  # mechanic; if getInitialHintLevel(3) changes again, update the literal.
   fire_stop "$tmp" "q" "a\n\n<!-- HINT_META {\"topic\":\"t1\",\"correct\":false,\"domain\":\"web\",\"hintLevel\":0} /HINT_META -->" > /dev/null
   fire_stop "$tmp" "q" "a\n\n<!-- HINT_META {\"topic\":\"t1\",\"correct\":false,\"domain\":\"web\",\"hintLevel\":0} /HINT_META -->" > /dev/null
   HL=$(node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1]+"/sessions/"+new Date().toISOString().slice(0,10)+".json","utf-8")); console.log(d.hint_state.currentLevel)' "$tmp")
-  [[ "$HL" == "1" ]] && pass "hint ascended after 2 fails (level=$HL)" || fail "S4a hint didn't ascend (got $HL)"
+  [[ "$HL" == "3" ]] && pass "hint ascended after 2 fails (level=$HL)" || fail "S4a hint didn't ascend (got $HL)"
   teardown_state "$tmp"
 fi
 
@@ -467,22 +469,71 @@ if should_run 20; then
   teardown_state "$tmp"
 fi
 
-## S19 level-1 hard-limits block is injected only when level=1
+## S19 per-level protocol blocks (L1 hard-limits, L2/L3/L4 protocols, L5 silent)
 if should_run 19; then
-  header "S19 level-1 hard-limits block (only at level 1)"
-  tmp=$(setup_state 19)
+  header "S19 per-level protocol blocks (mode-sensitive)"
 
-  # 19a — at level 1, the CRITICAL block is present
-  node -e 'const fs=require("fs"); const p=process.argv[1]+"/profile.json"; const d=JSON.parse(fs.readFileSync(p,"utf-8")); d.global_level=1; fs.writeFileSync(p,JSON.stringify(d,null,2))' "$tmp"
+  set_profile() {
+    # $1=tmp $2=level $3=mode
+    node -e 'const fs=require("fs"); const p=process.argv[1]+"/profile.json"; const d=JSON.parse(fs.readFileSync(p,"utf-8")); d.global_level=Number(process.argv[2]); d.mode=process.argv[3]; fs.writeFileSync(p,JSON.stringify(d,null,2))' "$1" "$2" "$3"
+  }
+
+  # 19a — at level 1 (learn), HARD LIMITS block is present
+  tmp=$(setup_state 19a); set_profile "$tmp" 1 learn
   OUT=$(fire_pre "$tmp" "implementame algo")
-  echo "$OUT" | grep -q "LEVEL 1 HARD LIMITS" && pass "level=1 injects HARD LIMITS block" || fail "S19a missing HARD LIMITS at level 1"
-  echo "$OUT" | grep -q "DO NOT call Write" && pass "block reminds about Write/Edit gate" || fail "S19b missing Write gate reminder"
+  echo "$OUT" | grep -q "LEVEL 1 HARD LIMITS" && pass "L1: HARD LIMITS block injected" || fail "S19a missing HARD LIMITS at level 1"
+  echo "$OUT" | grep -q "DO NOT call Write" && pass "L1: block reminds about Write/Edit gate" || fail "S19a2 missing Write gate reminder"
+  teardown_state "$tmp"
 
-  # 19b — at level 3, the block must NOT appear
-  node -e 'const fs=require("fs"); const p=process.argv[1]+"/profile.json"; const d=JSON.parse(fs.readFileSync(p,"utf-8")); d.global_level=3; fs.writeFileSync(p,JSON.stringify(d,null,2))' "$tmp"
-  OUT=$(fire_pre "$tmp" "implementame algo")
-  echo "$OUT" | grep -q "LEVEL 1 HARD LIMITS" && fail "S19c HARD LIMITS leaked into level 3" || pass "level=3 does NOT inject HARD LIMITS block"
+  # 19b — at level 2 (learn), L2 protocol present (learn flavor) + no L1 leak
+  tmp=$(setup_state 19b); set_profile "$tmp" 2 learn
+  OUT=$(fire_pre "$tmp" "dame una funcion que valide emails")
+  echo "$OUT" | grep -q "LEVEL 2 PROTOCOL (learn" && pass "L2 learn: protocol block injected" || fail "S19b missing L2 learn block"
+  echo "$OUT" | grep -q "state the WHY" && pass "L2 learn: requires WHY before non-trivial decisions" || fail "S19b2 L2 learn missing WHY rule"
+  echo "$OUT" | grep -q "LEVEL 1 HARD LIMITS" && fail "S19b3 L1 block leaked into L2" || pass "L2: no L1 block leak"
+  teardown_state "$tmp"
 
+  # 19c — at level 2 (productive), shorter L2 productive block
+  tmp=$(setup_state 19c); set_profile "$tmp" 2 productive
+  OUT=$(fire_pre "$tmp" "dame una funcion que valide emails")
+  echo "$OUT" | grep -q "LEVEL 2 PROTOCOL (productive" && pass "L2 productive: protocol block injected" || fail "S19c missing L2 productive block"
+  echo "$OUT" | grep -q "LEVEL 2 PROTOCOL (learn" && fail "S19c2 L2 learn flavor leaked into productive" || pass "L2 productive: no learn-flavor leak"
+  teardown_state "$tmp"
+
+  # 19d — at level 3 (learn), L3 learn protocol + gapped code + "¿Qué enfoque"
+  tmp=$(setup_state 19d); set_profile "$tmp" 3 learn
+  OUT=$(fire_pre "$tmp" "implementame algo no trivial")
+  echo "$OUT" | grep -q "LEVEL 3 PROTOCOL (learn" && pass "L3 learn: protocol block injected" || fail "S19d missing L3 learn block"
+  echo "$OUT" | grep -q "¿Qué enfoque" && pass "L3 learn: asks for approach first" || fail "S19d2 L3 learn missing approach question"
+  echo "$OUT" | grep -q "gapped code" && pass "L3 learn: requires gapped code" || fail "S19d3 L3 learn missing gapped code"
+  echo "$OUT" | grep -q "LEVEL 1 HARD LIMITS" && fail "S19d4 L1 block leaked into L3" || pass "L3: no L1 block leak"
+  teardown_state "$tmp"
+
+  # 19e — at level 3 (productive), direct implementation, no gapped code
+  tmp=$(setup_state 19e); set_profile "$tmp" 3 productive
+  OUT=$(fire_pre "$tmp" "implementame algo no trivial")
+  echo "$OUT" | grep -q "LEVEL 3 PROTOCOL (productive" && pass "L3 productive: protocol block injected" || fail "S19e missing L3 productive block"
+  echo "$OUT" | grep -q "No gapped code" && pass "L3 productive: explicitly no gapped code" || fail "S19e2 L3 productive should disable gapped code"
+  teardown_state "$tmp"
+
+  # 19f — at level 4 (learn), challenge-as-question required
+  tmp=$(setup_state 19f); set_profile "$tmp" 4 learn
+  OUT=$(fire_pre "$tmp" "aqui esta mi propuesta de arquitectura")
+  echo "$OUT" | grep -q "LEVEL 4 PROTOCOL (learn" && pass "L4 learn: protocol block injected" || fail "S19f missing L4 learn block"
+  echo "$OUT" | grep -q "at least ONE concrete challenge" && pass "L4 learn: requires at least one challenge" || fail "S19f2 L4 learn missing challenge rule"
+  teardown_state "$tmp"
+
+  # 19g — at level 4 (productive), terse, critical-only
+  tmp=$(setup_state 19g); set_profile "$tmp" 4 productive
+  OUT=$(fire_pre "$tmp" "implementa esto")
+  echo "$OUT" | grep -q "LEVEL 4 PROTOCOL (productive" && pass "L4 productive: protocol block injected" || fail "S19g missing L4 productive block"
+  echo "$OUT" | grep -q "Flag ONLY the critical" && pass "L4 productive: critical-only flagging" || fail "S19g2 L4 productive missing critical-only rule"
+  teardown_state "$tmp"
+
+  # 19h — at level 5, NO protocol block (silent colleague)
+  tmp=$(setup_state 19h); set_profile "$tmp" 5 learn
+  OUT=$(fire_pre "$tmp" "implementa esto")
+  echo "$OUT" | grep -qE "LEVEL [1-5] (HARD LIMITS|PROTOCOL)" && fail "S19h L5 unexpectedly got a protocol block" || pass "L5: no protocol block (silent colleague)"
   teardown_state "$tmp"
 fi
 
@@ -605,6 +656,67 @@ if should_run 21; then
   done
   HAS=$(node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")); process.stdout.write((d.pending_diagnostic||d.pending_calibration_change)?"yes":"no")' "$tmp/profile.json")
   [[ "$HAS" == "no" ]] && pass "10 correct on ONE topic -> no diagnostic (diversity floor)" || fail "S21g single-topic correctness pre-maturely promoted"
+  teardown_state "$tmp"
+fi
+
+## S23 anti-adulation guards: depth-diversity floor + diagnostic anti-adulation
+if should_run 23; then
+  header "S23 anti-adulation guards (depth floor + diagnostic anti-adulation)"
+
+  # 23a — depth diversity floor: L1, 10 correct with avg weight >= 0.5 but only
+  # 4 low-hint correct (need 5). Mix: 6 at hintLevel=3 (w=0.4), 4 at hintLevel=0
+  # (w=1.0). Distinct topics. avg = (6*0.4 + 4*1.0)/10 = 0.64 >= 0.5.
+  # lowHintCount=4 < ceil(10/2)=5 → blocked.
+  tmp=$(setup_state 23a)
+  node -e 'const fs=require("fs"); const p=process.argv[1]+"/profile.json"; const d=JSON.parse(fs.readFileSync(p,"utf-8")); d.global_level=1; fs.writeFileSync(p,JSON.stringify(d,null,2))' "$tmp"
+  # 6 correct at hintLevel=3 (above-hint), all distinct topics
+  for i in 1 2 3 4 5 6; do
+    fire_stop "$tmp" "q$i" "a$i\n\n<!-- HINT_META {\"topic\":\"topic-hi-$i\",\"correct\":true,\"domain\":\"fundamentos\",\"hintLevel\":3} /HINT_META -->" > /dev/null
+  done
+  # 4 correct at hintLevel=0 (low-hint), distinct topics
+  for i in 7 8 9 10; do
+    fire_stop "$tmp" "q$i" "a$i\n\n<!-- HINT_META {\"topic\":\"topic-lo-$i\",\"correct\":true,\"domain\":\"fundamentos\",\"hintLevel\":0} /HINT_META -->" > /dev/null
+  done
+  HAS=$(node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")); process.stdout.write((d.pending_diagnostic||d.pending_calibration_change)?"yes":"no")' "$tmp/profile.json")
+  [[ "$HAS" == "no" ]] && pass "depth floor blocks when low-hint correct < ceil(needed/2)" || fail "S23a depth floor did not block (4 low-hint out of 10 needed)"
+  teardown_state "$tmp"
+
+  # 23b — depth diversity floor: same as 23a but flipped — 5 low-hint, 5 high-hint.
+  # avg = (5*1.0 + 5*0.4)/10 = 0.7, lowHintCount=5 >= ceil(10/2)=5 → should enter diagnostic.
+  tmp=$(setup_state 23b)
+  node -e 'const fs=require("fs"); const p=process.argv[1]+"/profile.json"; const d=JSON.parse(fs.readFileSync(p,"utf-8")); d.global_level=1; fs.writeFileSync(p,JSON.stringify(d,null,2))' "$tmp"
+  for i in 1 2 3 4 5; do
+    fire_stop "$tmp" "q$i" "a$i\n\n<!-- HINT_META {\"topic\":\"topic-lo-$i\",\"correct\":true,\"domain\":\"fundamentos\",\"hintLevel\":0} /HINT_META -->" > /dev/null
+  done
+  for i in 6 7 8 9 10; do
+    fire_stop "$tmp" "q$i" "a$i\n\n<!-- HINT_META {\"topic\":\"topic-hi-$i\",\"correct\":true,\"domain\":\"fundamentos\",\"hintLevel\":3} /HINT_META -->" > /dev/null
+  done
+  HAS=$(node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")); const p=d.pending_diagnostic; process.stdout.write(p && p.target_level===2 ? "yes" : "no")' "$tmp/profile.json")
+  [[ "$HAS" == "yes" ]] && pass "depth floor allows when low-hint correct >= ceil(needed/2)" || fail "S23b depth floor wrongly blocked 5 low-hint of 10"
+  teardown_state "$tmp"
+
+  # 23c — diagnostic anti-adulation injection: when pending_diagnostic is set,
+  # the pre-prompt hook must include ANTI-ADULATION guidance.
+  tmp=$(setup_state 23c)
+  node -e '
+    const fs=require("fs");
+    const p=process.argv[1]+"/profile.json";
+    const d=JSON.parse(fs.readFileSync(p,"utf-8"));
+    d.global_level=3;
+    d.pending_diagnostic={target_level:4,started_turn:0,turns_asked:0,turns_passed:0,suggested_at:new Date().toISOString()};
+    fs.writeFileSync(p,JSON.stringify(d,null,2));
+  ' "$tmp"
+  OUT=$(fire_pre "$tmp" "quiero seguir con el feature")
+  echo "$OUT" | grep -q "DIAGNOSTIC MODE" && pass "diagnostic block injected while active" || fail "S23c diagnostic block missing"
+  echo "$OUT" | grep -q "ANTI-ADULATION" && pass "diagnostic injects anti-adulation guidance" || fail "S23c ANTI-ADULATION guidance missing in diagnostic"
+  echo "$OUT" | grep -q "default to fail\|When in doubt, set diagnostic=\"fail\"" && pass "anti-adulation tells grader to default to fail on ambiguity" || fail "S23c anti-adulation missing fail-default rule"
+  teardown_state "$tmp"
+
+  # 23d — no diagnostic, no anti-adulation (anti-adulation must not leak)
+  tmp=$(setup_state 23d)
+  node -e 'const fs=require("fs"); const p=process.argv[1]+"/profile.json"; const d=JSON.parse(fs.readFileSync(p,"utf-8")); d.global_level=3; fs.writeFileSync(p,JSON.stringify(d,null,2))' "$tmp"
+  OUT=$(fire_pre "$tmp" "hola")
+  echo "$OUT" | grep -q "ANTI-ADULATION" && fail "S23d ANTI-ADULATION leaked when no diagnostic active" || pass "no diagnostic -> no anti-adulation leak"
   teardown_state "$tmp"
 fi
 

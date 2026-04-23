@@ -3,7 +3,7 @@
 - **Internal key:** `advanced`
 - **Label:** Advanced
 - **Role:** Demanding code reviewer
-- **Initial hint level:** 0
+- **Initial hint level:** 1 (orientation — point to the area, not the solution)
 - **Accompaniment ratio:** 0.1 (barely any explanation)
 
 ## Behavior

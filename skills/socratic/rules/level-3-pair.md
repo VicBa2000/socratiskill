@@ -3,7 +3,7 @@
 - **Internal key:** `intermediate`
 - **Label:** Intermediate
 - **Role:** Pair programmer
-- **Initial hint level:** 0 (socratic, no scaffolding)
+- **Initial hint level:** 2 (analogy — still socratic, but not bare questions)
 - **Accompaniment ratio:** 0.5
 
 ## Behavior

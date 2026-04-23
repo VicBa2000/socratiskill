@@ -285,6 +285,15 @@ function main(): void {
     lines.push(
       `DIAGNOSTIC MODE (${remaining} turn(s) remaining): the user may be ready for level ${diag.target_level}. THIS turn, ask ONE concise comprehension question appropriate for level ${diag.target_level}, on a topic the user recently engaged with. Do NOT announce the diagnostic to the user — frame it as a natural follow-up. In your HINT_META, set \`diagnostic\` to \`"pass"\` if their answer demonstrates level-${diag.target_level} understanding, \`"fail"\` if it falls short. If the user is clearly off-topic, ignore (set diagnostic to null).`,
     )
+    // Anti-adulation pressure during the diagnostic window. The grader
+    // (the model itself) is the same system that otherwise tends toward
+    // optimistic agreement; the diagnostic is the single decision point
+    // where that bias most distorts the calibration. A "mostly right"
+    // verdict inflated here translates directly into an undeserved
+    // promotion, so we instruct the model to default to fail on ambiguity.
+    lines.push(
+      "ANTI-ADULATION (active for this diagnostic): judge the user's answer on SUBSTANCE, not tone or confidence. A vague, partial, or hand-wavy answer is a FAIL, not a PASS. Confident-sounding guesses are FAIL. When in doubt, set diagnostic=\"fail\". Do NOT hedge, do NOT soften the grade to be encouraging — an inflated pass here promotes the user to a level they're not ready for.",
+    )
   }
 
   if (profile.challenge_next_turn) {
@@ -338,13 +347,16 @@ function main(): void {
     )
   }
 
-  // Level 1 hard-limit reinforcement. The rule files describe the
+  // Per-level protocol reinforcement. The rule files describe the
   // expected behavior, but soft sentences in markdown don't survive the
   // pull of the system prompt's "be helpful, complete tasks". A short,
   // imperative, capitalized block injected at the END of the SOCRATIC
   // CONTEXT (just before the META PROTOCOL) sits closest to the model's
   // generation step and reliably triggers the chunked / ask-first
-  // protocol observed empirically to fail without it.
+  // protocol observed empirically to fail without it. Each level's
+  // block is calibrated to its pedagogical role, and attenuated in
+  // `productive` mode to respect the user's request for less friction.
+  // Level 5 has no block (silent colleague = default Claude Code).
   if (level === 1) {
     lines.push("")
     lines.push("--- LEVEL 1 HARD LIMITS (critical, not optional) ---")
@@ -355,6 +367,47 @@ function main(): void {
     lines.push("After approval, write code in chunks of <=30 lines and ask a follow-up verification question after each chunk before continuing.")
     lines.push("If the user explicitly overrides (\"escribilo todo\", \"ya sé esto\"), acknowledge in one line, proceed for that turn only, and tell them this bypasses level 1 — suggest /socratiskill:socratic level 3.")
     lines.push("Violating any of the above is a critical failure of the socratic mode, not a stylistic imperfection. See skills/socratic/rules/level-1-teacher.md for examples of GOOD vs BAD turns.")
+  } else if (level === 2) {
+    lines.push("")
+    if (mode === "learn") {
+      lines.push("--- LEVEL 2 PROTOCOL (learn, active) ---")
+      lines.push("BEFORE introducing a decision that is non-trivial for a basic user (library choice, control-flow pattern, error-handling approach, non-obvious syntax, data structure), state the WHY in 1-2 sentences BEFORE the code block.")
+      lines.push("AFTER each code block that introduces something new, ask ONE comprehension question (e.g., \"¿por qué elegí X y no Y?\", \"¿qué pasa si el input viene vacío?\"). Wait for the answer before moving to the next block.")
+      lines.push("Do NOT re-teach vocabulary the user has already used correctly in THIS session.")
+      lines.push("Do NOT explain line-by-line. Block-by-block is enough.")
+      lines.push("Comprehension questions must test UNDERSTANDING, not preference. \"¿te parece bien?\" and \"¿alguna pregunta?\" do NOT count.")
+    } else {
+      lines.push("--- LEVEL 2 PROTOCOL (productive, active) ---")
+      lines.push("Write code directly, but explain the WHY in 1 sentence for any non-obvious decision (library choice, control-flow, error handling).")
+      lines.push("Verify comprehension ONLY when you introduce a concept the user has not used in this session. One question, not a quiz. No line-by-line explanations.")
+    }
+  } else if (level === 3) {
+    lines.push("")
+    if (mode === "learn") {
+      lines.push("--- LEVEL 3 PROTOCOL (learn, active) ---")
+      lines.push("For any non-trivial implementation (new feature, refactor, anything >5 lines or touching logic), START with \"¿Qué enfoque tenés en mente?\" or an equivalent. Do NOT write code yet. Wait for the user's reply.")
+      lines.push("If their proposed approach has a gap, point it out as a QUESTION, not a correction (e.g., \"¿qué pasa si el input es vacío?\", \"¿cómo manejarías un error ahí?\"). Do not hand them the fix.")
+      lines.push("Use gapped code (`___`) in at least ONE non-trivial spot per turn. Verify their fill-in before continuing.")
+      lines.push("Trivial edits (rename, format, single-line fix, import reorder) are EXEMPT — implement directly without the \"¿qué enfoque tenés?\" preamble.")
+      lines.push("Do NOT explain basics (loops, conditionals, stdlib functions) — assume competence.")
+    } else {
+      lines.push("--- LEVEL 3 PROTOCOL (productive, active) ---")
+      lines.push("Write code directly. Challenge ONLY decisions that are non-obvious or carry risk (data shape, error handling, concurrency, security) — raise the challenge as a brief question before committing.")
+      lines.push("No \"¿qué enfoque tenés?\" preamble. No gapped code. Direct implementation.")
+      lines.push("Do NOT explain basics — assume competence.")
+    }
+  } else if (level === 4) {
+    lines.push("")
+    if (mode === "learn") {
+      lines.push("--- LEVEL 4 PROTOCOL (learn, active) ---")
+      lines.push("BEFORE accepting the user's proposal, raise at least ONE concrete challenge as a question: an unhandled edge case, a security concern, a scalability limit, or a design alternative they did not mention.")
+      lines.push("Frame the challenge as a question: \"¿Consideraste X?\", \"¿qué pasa si Y?\", \"¿por qué no Z en vez de W?\".")
+      lines.push("Skip this ONLY when the task is genuinely trivial (rename, format, typo fix, import reorder).")
+      lines.push("Do NOT explain basics. Do NOT flatter. If an approach is weak, say so with a concrete reason.")
+    } else {
+      lines.push("--- LEVEL 4 PROTOCOL (productive, active) ---")
+      lines.push("Implement directly. Flag ONLY the critical: vulnerability, serious bug, anti-pattern, or significantly better alternative — as one brief question (\"¿Intencional?\", \"¿Consideraste X?\"). Do not question minor stylistic choices.")
+    }
   }
 
   lines.push("")
