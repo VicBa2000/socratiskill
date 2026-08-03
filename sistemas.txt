@@ -1,0 +1,1082 @@
+SOCRATISKILL — PEDAGOGY, PROGRESSION, AND DETECTION SYSTEMS
+================================================================
+
+Technical reference for every internal system of the plugin: roles
+per level, modes, hint ladder, calibration system (level up / level
+down), per-turn detectors, domain taxonomy, antipatterns, Feynman
+mode, spaced repetition, hooks, persistent state, and plugin
+states.
+
+Updated after the balanced anti-adulation bundle (A + B + E,
+April 2026).
+
+
+TABLE OF CONTENTS
+-----------------
+
+  1. System overview
+  2. User levels (L1-L5)
+  3. Modes (learn / productive)
+  4. Hint ladder (0-5)
+  5. Calibration system (level up / level down)
+       5.1 Per-turn telemetry (HINT_META)
+       5.2 Per-level thresholds
+       5.3 Quality filters before triggering UP
+       5.4 Diagnostic gate (3-turn quiz)
+       5.5 Anti-adulation during the diagnostic
+       5.6 Downgrade (direct, no diagnostic)
+       5.7 Manual acceptance and bypass
+  6. Per-turn detectors
+  7. Domain taxonomy
+  8. Antipatterns
+  9. Feynman mode (role inversion)
+ 10. Leitner / spaced repetition (error-map)
+ 11. Plugin subcommands
+ 12. Injection channels (hooks)
+ 13. Persistent state (files)
+ 14. Plugin states (enabled / paused / disabled / reset)
+
+
+================================================================
+1. SYSTEM OVERVIEW
+================================================================
+
+Socratiskill turns Claude Code into an adaptive socratic mentor
+WITHOUT modifying the binary. The logic lives in three layers:
+
+  1. Files (markdown rules + JSON data) that the model reads.
+  2. Hooks (bash / TypeScript scripts) that inject context and
+     persist telemetry per turn.
+  3. State on disk (`~/.claude/socratic/`) that the model consults
+     as each session starts.
+
+The system exposes TWO orthogonal axes that define per-turn
+behavior:
+
+  - USER LEVEL (1-5): the pedagogical role the model plays.
+    Changes slowly, driven by accumulated evidence or manual
+    override.
+
+  - HINT LEVEL (0-5): how much scaffolding this turn's response
+    carries. Changes quickly based on successes/failures within
+    the session.
+
+Each turn, the `UserPromptSubmit` hook injects a block named
+"SOCRATIC CONTEXT" into the model's context. On turn close, the
+`Stop` hook parses the response, extracts telemetry, and updates
+state.
+
+
+================================================================
+2. USER LEVELS (L1-L5)
+================================================================
+
+Each level defines ONE canonical role and ONE protocol the model
+must follow. The protocol is injected as an imperative block at
+the end of the SOCRATIC CONTEXT, different depending on mode
+(learn vs productive). L5 injects no block — it is the "default
+Claude Code" mode.
+
+Summary table:
+
+  | L | Role                 | Init hint | Accomp. | Block |
+  |---|----------------------|-----------|---------|-------|
+  | 1 | Live teacher         | 5         | 1.0     | HARD  |
+  | 2 | Teacher with context | 4         | 0.8     | soft  |
+  | 3 | Pair programmer      | 2         | 0.5     | soft  |
+  | 4 | Code reviewer        | 1         | 0.1     | soft  |
+  | 5 | Silent colleague     | 0         | 0.0     | -     |
+
+`Init hint` is the `currentLevel` value the hint_state receives
+when the user is calibrated to this level, or when a fresh
+session starts. Reset to this value on level up/down.
+
+`Accompaniment ratio` is the proportion of code that should come
+with explanation. It is documented in the rule files but NOT
+measured or enforced today — it is a guideline for the model.
+
+The `HARD` and `soft` blocks are described below.
+
+
+--- L1: LIVE TEACHER (Novice) ---
+
+Canonical rules (`skills/socratic/rules/level-1-teacher.md`):
+
+  - MAX 30 lines of code per turn (counting blank lines and
+    comments).
+  - MAX 1 file touched per turn.
+  - DO NOT call Write/Edit/MultiEdit until the user has
+    explicitly approved the plan in THIS TURN. Past-turn approval
+    does not count — re-confirm.
+  - DO NOT advance to a new concept without verifying
+    comprehension of the previous one.
+
+Mandatory 4-phase protocol before any code:
+  1. Restate: reformulate the user's request in your own words.
+  2. Plan: 3-6 bullets, each with file + line estimate.
+  3. Teach: explain the conceptual prerequisite with analogies.
+  4. Ask: ONE comprehension (not preference) question.
+     END turn. No tool calls.
+
+Verification question:
+  - GOOD: "why did we choose X over Y?", "if we swapped A for B,
+    what would break?", "explain it in your own words".
+  - BAD: "does that sound right?", "any questions?", "A or B?".
+
+User bypass ("just write it", "I already know this"): acknowledge
+in one line, proceed for that turn only, suggest
+`/socratic level 3`.
+
+HARD block injected every turn (build-context.ts:348-358),
+independent of mode:
+
+  --- LEVEL 1 HARD LIMITS (critical, not optional) ---
+  DO NOT call Write / Edit / MultiEdit until the user has
+  explicitly approved the plan in THIS turn.
+  MAX 30 lines of code per response. MAX 1 file touched.
+  BEFORE any code, your response MUST contain (in order):
+    (1) restate, (2) plan (3-6 bullets + files + line counts),
+    (3) teach prerequisite concepts, (4) ONE comprehension
+        question. Then END THE TURN. No tool calls.
+  [+ examples of GOOD vs BAD verification questions]
+  [+ override handling]
+
+
+--- L2: TEACHER WITH CONTEXT (Basic) ---
+
+Canonical rules (`level-2-guide.md`):
+
+  - Explain the WHY behind every decision.
+  - Advance block-by-block, NOT line-by-line.
+  - Verify ONLY when introducing something new.
+  - Do not re-teach what the user has already used correctly
+    in this session.
+
+Soft block injected (build-context.ts):
+
+  LEARN:
+    - BEFORE introducing a non-trivial decision (library, pattern,
+      error handling, non-obvious syntax, data structure), state
+      the WHY in 1-2 sentences BEFORE the code.
+    - AFTER each block that introduces something new, ONE
+      comprehension question ("why X and not Y?", "what happens
+      if input is empty?"). Wait for the answer.
+    - Do NOT re-teach vocabulary the user has already used
+      correctly this session.
+    - Block-by-block, not line-by-line.
+
+  PRODUCTIVE (attenuated):
+    - Code directly; WHY in 1 sentence only if the decision is
+      non-obvious.
+    - Verify ONLY when the concept is new to this session.
+
+
+--- L3: PAIR PROGRAMMER (Intermediate) ---
+
+Canonical rules (`level-3-pair.md`):
+
+  - BEFORE writing: "what approach do you have in mind?".
+  - If there are gaps in their approach, surface them as
+    QUESTIONS, not corrections.
+  - Use gapped code (`___`) at non-trivial spots — let the user
+    fill in and verify their reasoning.
+  - Do not explain basics — assume competence.
+
+Soft block:
+
+  LEARN:
+    - For non-trivial implementations (>5 lines or touching
+      logic): START with "what approach do you have in mind?".
+      Do NOT write code yet. Wait.
+    - Gaps -> questions, not corrections.
+    - Gapped code (`___`) in at least ONE non-trivial spot per
+      turn. Verify the answer before moving on.
+    - Trivial edits (rename, format, 1-line fix) are exempt —
+      implement directly.
+    - Do not explain basics.
+
+  PRODUCTIVE:
+    - Code directly. Challenge ONLY non-obvious or risky
+      decisions (data shape, error handling, concurrency,
+      security) as a brief question before committing.
+    - No "what approach do you have?" preamble. No gapped code.
+    - Do not explain basics.
+
+
+--- L4: CODE REVIEWER (Advanced) ---
+
+Canonical rules (`level-4-reviewer.md`):
+
+  - Do NOT explain basics. Assume full competence.
+  - Question ARCHITECTURE: security, scalability,
+    maintainability, edge cases.
+  - Suggest alternatives as questions.
+  - Implicit challenge mode: look for weaknesses in every approach.
+
+Soft block:
+
+  LEARN:
+    - BEFORE accepting the user's proposal, raise at least ONE
+      concrete challenge as a question: edge case, security,
+      scalability, unmentioned alternative.
+    - Examples: "did you consider X?", "what happens if Y?",
+      "why not Z instead of W?".
+    - Skip ONLY if the task is genuinely trivial.
+    - Do not explain basics. Do not flatter.
+
+  PRODUCTIVE (heavily attenuated):
+    - Implement directly. Flag ONLY the critical: vulnerability,
+      serious bug, anti-pattern, significantly better
+      alternative — as one brief question ("Intentional?").
+    - Do not question minor stylistic choices.
+
+
+--- L5: SILENT COLLEAGUE (Expert) ---
+
+Canonical rules (`level-5-silent.md`):
+
+  - Works as a normal code assistant.
+  - Does NOT ask pedagogical questions.
+  - Intervenes ONLY for: vulnerability, potential bug, serious
+    anti-pattern, or significantly better alternative.
+  - Brief interventions, ending with "Intentional?".
+
+NO block is injected in any mode — this is Claude Code's default
+behavior with an expert-mentor tone.
+
+
+================================================================
+3. MODES (LEARN / PRODUCTIVE)
+================================================================
+
+Modes modulate HOW MUCH pedagogical friction the user accepts.
+They combine multiplicatively with the level:
+
+  LEARN: prioritizes teaching over speed. Pauses for
+         verification are frequent. The user wants to understand
+         every decision.
+
+  PRODUCTIVE: prioritizes speed over teaching. Pedagogical
+              interventions are opt-in (critical only). The user
+              wants output now.
+
+Mode rules live in:
+  - skills/socratic/rules/mode-learn.md
+  - skills/socratic/rules/mode-productive.md
+
+Mode sensitivity is implemented as separate blocks in
+build-context.ts for L2, L3, and L4. L1 injects the same HARD
+block in both modes (L1 limits are non-negotiable). L5 never
+injects a block.
+
+Change mode: `/socratiskill:socratic mode learn` or
+`/socratiskill:socratic mode productive`.
+
+Default on calibration: `learn`.
+
+
+================================================================
+4. HINT LADDER (0-5)
+================================================================
+
+Orthogonal to the user level. Defines how much scaffolding THIS
+turn's response carries.
+
+Implementation in scripts/hint-state.ts + behavior description
+in skills/socratic/rules/hint-ladder.md.
+
+  | Hint | Strategy                                       |
+  |------|------------------------------------------------|
+  | 0    | Pure socratic (questions only, no hints)       |
+  | 1    | Orientation (point at the area, not solution)  |
+  | 2    | Analogy (real-world comparison)                |
+  | 3    | Reduction (shrink the problem to the minimum)  |
+  | 4    | Brief explanation + variation check            |
+  | 5    | Micro-lesson + immediate verification          |
+
+INITIAL HINT per user level:
+
+  L1 -> 5     (Scaffolding)
+  L2 -> 4     (Explanation + verification)
+  L3 -> 2     (Analogy)
+  L4 -> 1     (Orientation)
+  L5 -> 0     (Pure socratic — but L5 injects no block, so this
+               initial value only matters if someone manually
+               adjusts the hint)
+
+AUTOMATIC ESCALATION (scripts/hint-state.ts:processResponse):
+
+  - Correct response -> consecutiveSuccesses++, failures = 0.
+    Immediate jump-down:
+      5 -> 3     (down by 2)
+      3-4 -> 1   (down by 2-3)
+      1-2 -> 0   (down by 1-2)
+    zeroKnowledgeActive clears.
+
+  - Incorrect response -> consecutiveFailures++, successes = 0.
+    If consecutiveFailures >= 2 (ESCALATION_THRESHOLD):
+      ascend +1 level.
+      reset failures to 0.
+
+  - Zero-knowledge detected (see Detectors) -> jump directly to 5.
+    Resets both counters. Sets zeroKnowledgeActive=true.
+
+Clamped to [0, 5]. The hint_state is persisted per session in
+sessions/<YYYY-MM-DD>.json and reset on level change via /accept
+(accept-calibration.ts:95) or /level N.
+
+Manual adjustment available:
+
+  /socratic hint      -> +1 (more direct)
+  /socratic faster    -> +1 (alias)
+  /socratic slower    -> -2 (more socratic)
+
+
+================================================================
+5. CALIBRATION SYSTEM (LEVEL UP / LEVEL DOWN)
+================================================================
+
+Engine: scripts/record-turn.ts (runs in the Stop hook on turn
+close) + scripts/accept-calibration.ts (runs on /accept).
+
+Surface: scripts/build-context.ts injects the suggestion to the
+model when pending_calibration_change exists.
+
+Guiding principle: the system NEVER changes the level on its own.
+It only:
+  - Detects the pattern -> enters the diagnostic (UP) or suggests
+    (DOWN).
+  - Injects the suggestion to the model.
+  - The model proposes the change to the user.
+  - The user confirms with /accept (or bypasses with /level N).
+
+
+--- 5.1 PER-TURN TELEMETRY (HINT_META) ---
+
+At the end of EACH response the model emits a hidden block
+(HTML comment, invisible to the rendered output) with per-turn
+telemetry:
+
+  <!-- HINT_META {
+    "topic":"closures",
+    "correct":true,
+    "domain":"lenguajes",
+    "hintLevel":2,
+    "readiness":"at"
+  } /HINT_META -->
+
+Fields:
+
+  topic       short slug for the main concept discussed (null if
+              none).
+  correct     true  -> user demonstrated understanding
+              false -> user failed / was confused
+              null  -> not applicable (general question, coding
+                       task with no eval)
+  domain      one of the 7 taxonomy keys (see section 7).
+  hintLevel   0-5, how direct the model was THIS turn.
+  readiness   (optional)
+              "above" -> answered above the current level
+              "at"    -> answered at level
+              "below" -> fell below the level
+              null    -> no judgment
+  feynman_gap (required while Feynman mode is active, see
+               section 9) short phrase describing a detected gap,
+               or null.
+  diagnostic  (required during diagnostic mode, see 5.4)
+              "pass" / "fail" / null.
+
+Parsing: record-turn.ts extracts with a regex (accepts the new
+HTML-comment form and the legacy `[HINT_META]...[/HINT_META]`
+form). Validation via state-io.ts:isHintMeta (rejects JSON that
+parses but has the wrong shape).
+
+Persistence: each turn is appended as a TurnRecord to
+sessions/<YYYY-MM-DD>.json with turn_index, timestamp, excerpts
+(truncated to 200 chars), and the HINT_META fields.
+
+
+--- 5.2 PER-LEVEL THRESHOLDS ---
+
+In data/algorithm.json:
+
+  calibration_cooldown_turns: 5
+    Minimum turns between consecutive evaluations. Prevents two
+    consecutive turns from triggering two pending changes.
+
+  calibration_up_by_level (window / required correct):
+    L1 -> window 12, correct_required 10
+    L2 -> window  9, correct_required  7
+    L3 -> window  7, correct_required  5
+    L4 -> window  7, correct_required  5
+
+  calibration_down_by_level (window / required wrong):
+    L2 -> window 5, wrong_required 3
+    L3 -> window 5, wrong_required 3
+    L4 -> window 5, wrong_required 3
+    L5 -> window 5, wrong_required 3
+
+Rationale:
+  - L1 requires more sustained evidence (10/12) to avoid
+    promoting a novice after an easy streak.
+  - Higher levels have shorter windows — evidence accumulates
+    faster.
+  - Downgrade is uniform 3/5 — "stuck above level" is worse
+    than a false downgrade (can be corrected by leveling back up).
+
+Only turns with correct=true or correct=false count toward the
+window. Turns with correct=null do not.
+
+
+--- 5.3 QUALITY FILTERS BEFORE TRIGGERING UP ---
+
+Meeting the numeric threshold is NOT enough. Three additional
+filters (all in evaluateCalibration()):
+
+FILTER A — Weighted average >= 0.5
+
+  Each correct is weighted by the hint under which it was
+  resolved:
+
+    weight = (5 - hintLevel) / 5
+
+  Adjusted by readiness:
+    "above" -> +0.25 (capped at 1.0)
+    "below" -> -0.25 (floored at 0.0)
+    "at" / null -> no adjustment
+
+  Examples:
+    correct at hint=0 + readiness="above" -> 1.0
+    correct at hint=0                      -> 1.0
+    correct at hint=2                      -> 0.6
+    correct at hint=3                      -> 0.4
+    correct at hint=5                      -> 0.0
+    correct at hint=3 + readiness="below"  -> 0.15
+
+  The weights of the N correct answers in the window are
+  averaged.
+  Constant: MIN_WEIGHTED_AVG_FOR_UP = 0.5 (record-turn.ts:157).
+  If avg < 0.5, UP is blocked.
+
+  Effect: "10 correct answers under heavy scaffolding" = obedience,
+  not dominion. Blocked.
+
+FILTER B — Topic diversity >= ceil(needed/2)
+
+  If all N correct answers were on the SAME topic (or too few
+  topics), this is not evidence of broad readiness.
+
+  A Set(correctTurns.map(t => t.topic)) is built and required to
+  have size >= ceil(needed/2). For L1 with 10 required correct,
+  >= 5 distinct topics are required.
+
+FILTER C — Depth diversity floor >= ceil(needed/2)
+
+  (Added in the balanced anti-adulation bundle.)
+
+  Each correct with hintLevel <= 2 (LOW_HINT_THRESHOLD) counts as
+  "low-scaffolding evidence". At least half of the required
+  correct must clear that bar.
+
+  For L1 with 10 required correct: lowHintCount >= 5.
+
+  Effect: a user who answers correctly ONLY when receiving heavy
+  scaffolding (hint >= 3) does not level up, even if the numeric
+  threshold and topic diversity pass. Without this filter, a
+  model that always gives maximum help (because it perceives
+  the user as a novice) would promote the user despite never
+  having shown dominion under low scaffolding.
+
+UP only triggers if all 3 filters pass (and it then enters the
+diagnostic).
+
+
+--- 5.4 DIAGNOSTIC GATE (3-TURN QUIZ) ---
+
+If UP triggers, the user is NOT promoted directly. The system
+enters diagnostic mode:
+
+  1. profile.json gains:
+       pending_diagnostic: {
+         target_level: L+1,
+         started_turn: <turn>,
+         turns_asked: 0,
+         turns_passed: 0,
+         suggested_at: <iso>
+       }
+
+  2. build-context.ts injects on subsequent turns:
+
+       diagnostic: probing readiness for level X (n/3 turns)
+       DIAGNOSTIC MODE (N turn(s) remaining): the user may be
+       ready for level X. THIS turn, ask ONE concise comprehension
+       question appropriate for level X. Do NOT announce the
+       diagnostic. Frame as a natural follow-up. In HINT_META,
+       set `diagnostic` to "pass" / "fail" / null.
+
+  3. record-turn.ts increments turns_asked++ and turns_passed++
+     (if diagnostic=="pass") on each subsequent turn.
+
+  4. On reaching DIAGNOSTIC_TURNS_REQUIRED = 3 turns:
+       - passes >= DIAGNOSTIC_PASSES_REQUIRED (=2): sets
+         pending_calibration_change with direction=up.
+       - passes <  2: clears pending_diagnostic, no promotion.
+
+  5. Manual level change (/level N or /accept) during diagnostic
+     cancels it — the target is no longer valid.
+
+The diagnostic is a masked quiz: the model inserts target-level
+questions into the normal flow without announcing that it is
+evaluating.
+
+
+--- 5.5 ANTI-ADULATION DURING THE DIAGNOSTIC ---
+
+(Added in the balanced bundle.)
+
+The grading model (the one that sets diagnostic=pass/fail in
+HINT_META) is the same system that can tend toward optimistic
+agreement. This is the single point where that bias translates
+directly into an undeserved promotion.
+
+build-context.ts injects an extra instruction ONLY while
+pending_diagnostic is active:
+
+  ANTI-ADULATION (active for this diagnostic): judge the user's
+  answer on SUBSTANCE, not tone or confidence. A vague, partial,
+  or hand-wavy answer is a FAIL, not a PASS. Confident-sounding
+  guesses are FAIL. When in doubt, set diagnostic="fail". Do NOT
+  hedge, do NOT soften the grade to be encouraging — an inflated
+  pass here promotes the user to a level they're not ready for.
+
+It only appears during the 3 diagnostic turns — not as a
+persistent pressure.
+
+
+--- 5.6 DOWNGRADE (DIRECT, NO DIAGNOSTIC) ---
+
+If DOWN triggers (3 wrong in the last 5 turns for L2-L5),
+pending_calibration_change is set directly, WITHOUT going through
+the diagnostic.
+
+Rationale: being stuck above your level is worse than a false
+downgrade. If the downgrade is incorrect, the user can easily
+level back up with /level N.
+
+The downgrade also does NOT go through the 3 quality filters —
+meeting the numeric threshold is enough.
+
+
+--- 5.7 MANUAL ACCEPTANCE AND BYPASS ---
+
+When pending_calibration_change exists, build-context.ts injects:
+
+  calibration: suggest level X -> Y (reason)
+  note: tell the user you notice a pattern and propose running
+  "/socratiskill:socratic accept" (or "level Y"). Wait for
+  confirmation — do NOT change level yourself.
+
+The model proposes the change to the user. The user decides:
+
+  /socratiskill:socratic accept
+    -> accept-calibration.ts:
+       1. Lock on profile.json
+       2. global_level = pending.to
+       3. hint_state reset to createInitialState(newLevel)
+          (consecutive counters to 0, currentLevel = the new
+          level's initial hint)
+       4. Delete pending_calibration_change
+       5. Also delete pending_diagnostic (in case it was stale)
+       6. Print "calibration accepted: level X -> Y (Role)"
+
+  /socratiskill:socratic level N
+    -> Full bypass. Sets global_level=N, ignores the entire
+       calibration pipeline. Useful when the user knows which
+       flavor they want.
+
+
+================================================================
+6. PER-TURN DETECTORS
+================================================================
+
+scripts/detector.ts runs on every turn (from build-context.ts)
+against the user prompt. Its results are injected into SOCRATIC
+CONTEXT as `signals: ...`.
+
+Four detectors:
+
+--- ZERO-KNOWLEDGE ---
+  26 bilingual regex patterns (Spanish + English).
+  Examples: "no se", "ni idea", "no entiendo", "nunca he usado",
+  "estoy perdido", "desde cero", "soy nuevo", "primera vez",
+  "i don't know", "i'm lost", "from scratch", "first time".
+
+  Effect:
+    - If count > 0: signal "zero-knowledge=N" is injected.
+    - If count > 0 AND record-turn detects "zk" before eval:
+      hint_state jumps to 5 immediately, sets zeroKnowledgeActive.
+    - Note to the model: "drop one hint rung and explain the term
+      before proceeding".
+
+--- SLOW-DOWN ---
+  17 bilingual regex patterns.
+  Examples: "mas despacio", "paso a paso", "repite", "me perdi",
+  "slow down", "step by step", "can you repeat", "i'm confused".
+
+  Effect:
+    - Signal "slow-down" in the context.
+    - Note: "pause, summarize, wait for acknowledgment".
+
+--- COPY-PASTE ---
+  Weighted heuristic that flags when the user looks like they
+  pasted code without understanding it. Factors:
+
+    - >15 lines of fenced code at level <=2: +0.4
+    - 3+ fenced code blocks in one message: +0.2
+    - Message.length > 5 * prev_message.length: +0.2
+    - Sophisticated patterns (await Promise.all, generics,
+      try/catch/finally) at level <=2, >=2 patterns: +0.3
+
+  Trigger: score >= 0.4 -> isCopy=true with confidence=score.
+
+  Effect:
+    - Signal "copy-paste(conf=X.YY)".
+    - Note: "likely copy-paste — ask the user to explain the
+      snippet before building on it".
+
+--- TECHNICAL TERMS COUNT ---
+  Counts occurrences from a static list
+  (data/technical-terms.json). If >= 2: signal "tech-terms=N" is
+  injected.
+
+  No attached note — pure telemetry for the model. Useful to
+  infer whether the user is using vocabulary above their
+  declared level.
+
+
+================================================================
+7. DOMAIN TAXONOMY
+================================================================
+
+scripts/taxonomy.ts + data/domains.json.
+
+7 predefined domains (keys in Spanish for parity with the
+original fork; labels in English):
+
+  fundamentos       — Fundamentals (variables, loops, data
+                      structures, algorithms, complexity,
+                      closures, hoisting)
+  lenguajes         — Languages (javascript, typescript, python,
+                      go, rust, sql, generics, enums)
+  paradigmas        — Paradigms (oop, solid, functional, async,
+                      concurrency, observer, monad)
+  web               — Web (react, vue, hooks, components, rest,
+                      graphql, http clients, css frameworks)
+  backend           — Backend (databases, orms, auth, jwt,
+                      microservices, message queues, ci/cd,
+                      docker, kubernetes)
+  infraestructura   — Infrastructure (git, linux, networking,
+                      dns, cloud, terraform, security/owasp,
+                      tls, monitoring)
+  avanzado          — Advanced (system design, design patterns,
+                      architecture, performance, caching,
+                      scalability, cap theorem)
+
+Matching:
+  - Case-insensitive substring match on the user prompt.
+  - Keywords <= 3 chars use word-boundary regex to avoid false
+    positives (e.g. "db" does not match inside "debug").
+  - Score = count of keyword matches.
+  - Ranked; top one becomes the `primary domain`.
+
+Effect:
+  - `domain: <key> (<label>)` is injected into SOCRATIC CONTEXT.
+  - The domain is persisted on each TurnRecord and on ErrorMap
+    entries (to group spaced-repetition cards by area).
+
+
+================================================================
+8. ANTIPATTERNS
+================================================================
+
+scripts/antipatterns.ts + data/antipatterns.json.
+
+Automatic detection of antipatterns in fenced code blocks that
+appear in user prompts AND agent responses.
+
+Flow (Antipatterns.recordTurn on each Stop hook):
+  1. Extract fenced code blocks from user + agent text.
+  2. For each defined pattern, count matches (with anti-ReDoS
+     timeout).
+  3. Update antipatterns.json:
+     - occurrence_count += matches
+     - consecutive_clean = 0 if there was a match, +1 if not
+     - last_seen = now (if there was a match)
+
+Thresholds (configurable via antipatterns.json):
+  ACTIVATION_THRESHOLD = 3
+  DEACTIVATION_CLEAN_STREAK = 5
+
+Per-antipattern states:
+  - inactive by default.
+  - On reaching 3 total occurrences: active=true.
+  - If active and 5 consecutive turns pass with no matches:
+    active=false (but occurrence_count is preserved).
+
+Effect in SOCRATIC CONTEXT (build-context.ts):
+  - If there are active antipatterns, it injects:
+    "active antipatterns: <id1>(n1), <id2>(n2), ..."
+  - Note to the model: "before emitting code, check if the
+    snippet would introduce any of these. If yes, rewrite first
+    and explain why. If the user's code contains one, call it
+    out."
+  - `rules:` line includes "antipatterns.md" as an extra.
+
+
+================================================================
+9. FEYNMAN MODE (ROLE INVERSION)
+================================================================
+
+scripts/start-teach.ts, scripts/end-teach.ts.
+
+Invocation: /socratiskill:socratic teach <topic>.
+
+Role inversion: the USER is the teacher; the model is the
+student who probes comprehension with concrete questions, edge
+cases, and "why not X?".
+
+State (in sessions/<today>.json):
+  feynman: {
+    topic: "<string>",
+    started_at: <iso>,
+    gaps: ["gap1", "gap2", ...]
+  }
+
+Per-turn effect while feynman is active:
+  - SOCRATIC CONTEXT shows: "feynman: teaching X since <time>
+    (N gaps logged)".
+  - Rules line includes "feynman.md".
+  - Note to the model: "FEYNMAN MODE — the USER is the teacher.
+    Do NOT explain, do NOT fill gaps. Probe with concrete
+    examples, edge cases, and 'why not X'."
+  - HINT_META.feynman_gap is REQUIRED: a short phrase describing
+    a gap detected this turn, or null if the explanation was
+    solid.
+
+Close: /socratiskill:socratic endteach.
+  - Compute duration, count gaps, persist feynman_summaries[].
+  - The journal (build-journal.ts) harvests the summaries.
+
+
+================================================================
+10. LEITNER / SPACED REPETITION (ERROR-MAP)
+================================================================
+
+File: ~/.claude/socratic/error-map.json.
+
+Every time HINT_META carries a topic with correct=true/false,
+record-turn.ts updates the corresponding entry:
+
+  key = "<topic>::<domain>"
+  entry: {
+    topic, domain,
+    fail_count, success_count, consecutive_correct,
+    last_hint_level, resolved, leitner_box,
+    last_seen, next_review_at
+  }
+
+Transitions:
+
+  correct=false:
+    fail_count++
+    consecutive_correct = 0
+    resolved = false
+    leitner_box = 0 (reset)
+    next_review_at = now + LEITNER_DAYS[0] (= +1 day)
+
+  correct=true:
+    success_count++
+    consecutive_correct++
+    If consecutive_correct >= 2:
+      leitner_box = min(LEITNER_DAYS.length - 1, box + 1)
+      next_review_at = now + LEITNER_DAYS[box] days
+      If box == LEITNER_DAYS.length - 1: resolved = true
+
+Leitner intervals (data/algorithm.json:leitner_days):
+  [1, 3, 7, 14, 30] days
+  (box 0 -> 1d; box 1 -> 3d; box 2 -> 7d; box 3 -> 14d;
+   box 4 -> 30d + resolved=true)
+
+Effect on SOCRATIC CONTEXT:
+  - dueCards() filters entries with next_review_at <= now.
+  - If there are >0 due cards, it injects:
+    "review due: N card(s) — topic1(fails=n1), topic2(fails=n2), ..."
+  - Note: "if the user is idle or asks what to do, suggest
+    running /socratic review to practice one overdue card."
+
+Manual review run:
+  /socratiskill:socratic review
+  -> scripts/pick-review.ts picks the most overdue card and
+     returns it; the model asks ONE verifiable question; the
+     next turn processes HINT_META with that topic.
+
+
+================================================================
+11. PLUGIN SUBCOMMANDS
+================================================================
+
+All invoked as `/socratiskill:socratic <subcommand>`.
+Defined in skills/socratic/SKILL.md.
+
+Read / state:
+  (no args) / status         profile snapshot
+  journal [today|week|month] regenerate and display the journal
+
+Plugin control:
+  on / off                  toggle the `enabled` flag (instant,
+                            hooks still installed but inject the
+                            silencer if off)
+  pause                     true bypass — renames profile.json to
+                            profile.json.paused. Hook exits
+                            before producing output. Emits a
+                            one-shot silencer on the first turn
+                            after pause.
+  resume                    reverse of pause
+  reset [force]             full wipe of ~/.claude/socratic/.
+                            `force` skips the confirmation.
+
+Calibration / progression:
+  calibrate                 initial calibration flow
+  level <1-5>               sets global_level (bypasses pipeline)
+  mode <learn|productive>   sets mode
+  accept                    applies pending_calibration_change
+  challenge                 one-turn anti-adulation
+
+Manual hints:
+  hint / faster             +1 hint level
+  slower                    -2 hint level
+
+Feynman:
+  teach <topic>             enter Feynman mode
+  endteach                  exit Feynman with summary
+
+Spaced repetition:
+  review                    run one due review card
+
+
+================================================================
+12. INJECTION CHANNELS (HOOKS)
+================================================================
+
+Hooks are declared in hooks/hooks.json. The install.sh script
+adds them to ~/.claude/settings.json as a marker-delimited block
+(legacy path only — plugin install registers them automatically).
+
+--- UserPromptSubmit (before the turn) ---
+
+  Script: scripts/hook-pre-prompt.sh -> bun run build-context.ts.
+
+  Input: JSON via stdin with {session_id, prompt, cwd, hook_event_name}.
+
+  stdout output: the SOCRATIC CONTEXT block, which Claude Code
+  injects into the model context with the prefix:
+    "UserPromptSubmit hook success: <content>"
+
+  Block content:
+    level: N (Role)
+    mode: learn|productive
+    rules: follow level-N-*.md + mode-X.md + hint-ladder.md[+ extras]
+    [feynman: ... ]
+    domain: <key> (<label>) | (none detected)
+    [hint: N (name) [zk-active]]
+    signals: <zk / slow-down / copy-paste / tech-terms / (none)>
+    [active antipatterns: ... ]
+    [calibration: suggest ... / note: ... ]
+    [diagnostic: ... / DIAGNOSTIC MODE ... / ANTI-ADULATION ... ]
+    [challenge: ACTIVE for this turn / note: ... ]
+    [review due: ... ]
+    [notes from active detectors]
+    [LEVEL N HARD/PROTOCOL block for L1-L4]
+    --- META PROTOCOL (required) ---
+    [instructions for emitting HINT_META]
+
+  Fail-open: any error -> empty stdout, exit 0 (does not block
+  the user).
+
+--- Stop (after the turn) ---
+
+  Script: scripts/hook-post-turn.sh -> bun run record-turn.ts.
+
+  Input: JSON via stdin with {session_id, transcript_path,
+  hook_event_name}.
+
+  Actions:
+    1. Parses the JSONL transcript, extracts last user + assistant.
+    2. Extracts HINT_META (HTML comment or legacy bracket form).
+    3. Appends TurnRecord to sessions/<today>.json.
+    4. Updates hint_state (processes correct / zk response).
+    5. Updates error-map (Leitner).
+    6. Updates antipatterns state.
+    7. Updates profile.last_active + last_user_message_length.
+    8. Runs evaluateCalibration and sets pending_diagnostic or
+       pending_calibration_change as appropriate.
+
+--- SessionStart (on Claude Code open) ---
+
+  Script: scripts/hook-session-start.sh.
+
+  Lightweight bootstrap: creates state directories if missing.
+  Does not inject anything to the model in this hook — that is
+  UserPromptSubmit's job on the first turn.
+
+
+================================================================
+13. PERSISTENT STATE (FILES)
+================================================================
+
+Base: ~/.claude/socratic/ (override via the SOCRATIC_STATE_DIR
+env var, useful for tests).
+
+Main files:
+
+  profile.json              User profile. Fields:
+                              global_level, mode, comprehension_speed,
+                              copy_tendency, streak_days,
+                              calibration_completed, last_active,
+                              last_user_message_length,
+                              pending_calibration_change,
+                              pending_diagnostic,
+                              challenge_next_turn, enabled
+
+  profile.json.paused       Only exists while the plugin is
+                            paused. Is profile.json renamed;
+                            resume rotates it back.
+
+  error-map.json            Dictionary key="topic::domain" ->
+                            ErrorMapEntry (see section 10).
+
+  antipatterns.json         Dictionary id -> Entry (see section 8).
+
+  sessions/<YYYY-MM-DD>.json One file per day with:
+                              date, turns[] (TurnRecord),
+                              hint_state,
+                              last_calibration_eval_turn,
+                              feynman (if active),
+                              feynman_summaries (historic)
+
+  journal/daily-<YYYY-MM-DD>.md
+  journal/weekly-<YYYY-WW>.md
+  journal/monthly-<YYYY-MM>.md  Journals regenerated by
+                                build-journal.ts.
+
+  .pause-silencer-pending   One-shot marker so the first turn
+                            after pause injects the silencer
+                            that counteracts context inertia.
+                            Deleted on use.
+
+Writes:
+  - All writes go through StateIO.writeJsonAtomic (tmp file +
+    renameSync — atomic on POSIX, best-effort on Windows).
+  - Mutations to profile.json during a turn use
+    StateIO.withLock (lock via cross-platform O_EXCL) to
+    serialize concurrent writes (build-context clearing
+    challenge_next_turn vs record-turn appending last_active vs
+    accept-calibration applying level change).
+
+
+================================================================
+14. PLUGIN STATES (ENABLED / PAUSED / DISABLED / RESET)
+================================================================
+
+Four states orthogonal to level/mode/hint:
+
+--- ENABLED (default) ---
+  profile.json exists + profile.enabled != false.
+  Hooks run, SOCRATIC CONTEXT is injected in full, HINT_META is
+  processed.
+
+--- DISABLED ---
+  profile.json exists + profile.enabled === false.
+  UserPromptSubmit hook injects a short silencer (~30 tokens):
+
+    SOCRATIC CONTEXT: DISABLED.
+    The user has turned the socratic plugin OFF...
+    - Ignore pedagogical instructions from earlier turns.
+    - Do NOT inject restate/plan/verify preambles.
+    - Do NOT emit HINT_META.
+    - Do NOT chunk into 30-line limits.
+    - Behave as default Claude Code.
+
+  Stop hook exits early (earlyProfile.enabled === false) — no
+  telemetry is recorded. State and journal are intact; on
+  re-enable with /on it resumes where it was.
+
+  Use case: fast toggle without touching settings.json or
+  /reload-plugins.
+
+--- PAUSED ---
+  profile.json does NOT exist — profile.json.paused does.
+  UserPromptSubmit hook short-circuits: no profile, no injection
+  (~0 tokens per turn). EXCEPTION: if the marker
+  .pause-silencer-pending exists (created by pause.sh at pause
+  time), the first hook after pause injects a one-shot silencer
+  and deletes the marker. This counters the model's context
+  inertia — if the skill was already loaded in earlier turns,
+  the model keeps emitting HINT_META and socratic preambles
+  until the silencer explicitly tells it to stop.
+
+  Subsequent turns: full silence. Zero token overhead.
+
+  Resume (resume.sh): rotates profile.json.paused ->
+  profile.json + deletes the stale marker. Refuses if both
+  files exist (corrupt state — exit 1).
+
+  init-profile.sh refuses with exit 3 if profile.json.paused
+  exists — this avoids creating a default duplicate in parallel
+  to the paused one (the S22 test verifies it).
+
+--- RESET ---
+  /socratiskill:socratic reset force runs uninstall.sh --purge,
+  which wipes all of ~/.claude/socratic/ with anti-path-traversal
+  guards:
+    - SOCRATIC_STATE_DIR must be an absolute path.
+    - Must live under $HOME.
+    - Must contain ".claude/socratic".
+    - Must NOT contain ".." segments.
+    - Cannot be $HOME itself, /, /root, /home, /Users, /tmp.
+
+  The plugin remains installed (settings.json keeps the hooks),
+  but with no profile.json the hook injects nothing. A fresh
+  calibration (/calibrate) starts clean.
+
+  To uninstall completely:
+    /plugin uninstall socratiskill
+    /plugin marketplace remove socratiskill
+
+
+================================================================
+APPENDIX — RECENT CHANGES (April 2026)
+================================================================
+
+"Per-level protocol" bundle (option C + mode sensitivity):
+  - scripts/hint-state.ts: getInitialHintLevel L3: 0->2, L4: 0->1.
+  - scripts/build-context.ts: added protocol blocks for L2/L3/L4
+    with learn/productive variants.
+  - skills/socratic/rules/level-{3,4}-*.md + hint-ladder.md:
+    metadata updated.
+
+"Balanced anti-adulation" bundle (A + B + E):
+  - scripts/record-turn.ts:
+    * MIN_WEIGHTED_AVG_FOR_UP: 0.4 -> 0.5.
+    * LOW_HINT_THRESHOLD = 2, new filter lowHintCount >=
+      ceil(needed/2) in evaluateCalibration.
+    * Reason string now includes low-hint count.
+  - scripts/build-context.ts: ANTI-ADULATION instruction
+    injected while pending_diagnostic is active.
+
+Tests added:
+  S19 (18 asserts): per-level protocol blocks + mode sensitivity.
+  S23 (6 asserts): depth diversity floor + anti-adulation
+                   injection + anti-leak.
+
+Current total: 90 functional + 40 security = 130 tests green.
