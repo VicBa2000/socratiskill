@@ -345,6 +345,105 @@
     your level is worse than a false downgrade.
 
 
+  ------------------------------------------------------------------
+  2.9 TRAIN YOUR OWN HANDS (immersive mode)
+  ------------------------------------------------------------------
+    Everything above changes how much Claude explains WHILE IT WRITES
+    your code. Immersive mode changes who writes it.
+
+      /socratiskill:socratic immersive 45      -> 45 min, ends alone
+      /socratiskill:socratic immersive on      -> until you say stop
+      /socratiskill:socratic immersive off     -> end now + report
+      /socratiskill:socratic immersive status  -> time left, unlocks
+
+    While it is on, Claude CANNOT write code. Not "will try not to" —
+    a PreToolUse hook denies Write/Edit/MultiEdit, refuses to hand the
+    job to a subagent, and blocks Bash commands that write files
+    (> redirects, tee, sed -i, git apply). Running your tests, git,
+    builds and linters keeps working; that is the point.
+
+    What Claude does instead is coach, at the rung the hint ladder is
+    currently on. Same escalation you already know — two wrong answers
+    or a "no sé" moves it up a rung — but the meanings change:
+
+      rung 0  asks only: "¿cómo lo abordarías?"
+      rung 1  names the file or module. Not what to do in it.
+      rung 2  points you at code you already wrote elsewhere here
+      rung 3  splits it into ordered subproblems, solves none
+      rung 4  explains the approach, makes you restate it first
+      rung 5  full work order: files, signatures, acceptance
+              criteria, edge cases. Still not one line of code.
+
+    You can steer it by hand as always: `hint` for more help,
+    `slower` for less.
+
+    Arrancando algo nuevo (proyecto, pagina, modulo)? El esqueleto
+    vacio no te entrena nada, asi que hay una ventana para eso:
+
+      /socratiskill:socratic scaffold          -> cupo segun tu nivel
+      /socratiskill:socratic scaffold 8        -> 8 archivos
+      /socratiskill:socratic scaffold status|close
+
+    Con la ventana abierta el agente puede CREAR archivos que no
+    existen. Editar los que ya existen sigue bloqueado — crear es
+    estructurar, editar es implementar. Las lineas que escriba se
+    cuentan y se DESCUENTAN de tu numero de autonomia.
+
+    Claude puede sugerirte el comando; no puede abrirlo solo. Pedirle
+    "hagamos la landing" en prosa no concede nada.
+
+    Real deadline mid-session:
+
+      /socratiskill:socratic unlock prod hotfix       -> 10 min
+      /socratiskill:socratic unlock 30 migracion      -> 30 min
+
+    The gate stands down and re-arms by itself. The reason is logged
+    in your session report. You will not be asked "are you sure" and
+    you will not be lectured about it — that is a deliberate rule, not
+    an oversight.
+
+    When the session ends (either way) you get:
+
+      immersive session ended (timebox elapsed)
+      duration: 45 min
+      you wrote: +127 / -34 lines
+      turns where you produced code: 6 / 11
+      average ladder rung: 2.3 (lower = you needed less help)
+      unlocks: 1 (5 min total) — prod hotfix
+
+    The line count comes from git, not from Claude's opinion: with the
+    gate closed, whatever showed up in your working tree came from
+    you. It survives committing mid-session. If you used an unlock,
+    the report says the count includes whatever Claude wrote in that
+    window — better a caveat than a number you would trust wrongly.
+
+    Totals per period land in your journal under "## Autonomy".
+
+  ------------------------------------------------------------------
+  2.10 DRILLS (deliberate practice from your own repo)
+  ------------------------------------------------------------------
+    /socratiskill:socratic drill analyze          -> quiz on your code
+    /socratiskill:socratic drill analyze <file>   -> a specific file
+    /socratiskill:socratic drill build            -> build from zero
+    /socratiskill:socratic drill status|done|cancel
+
+    ANALYZE answers "could I still find my way around this project
+    without an agent?". It picks a source file from your repo — the
+    script picks it, on rotation, so neither you nor Claude can choose
+    something comfortable — then asks one question per turn, working
+    up from "what does this do" to "what breaks if I delete this
+    line". Wrong answers become Leitner review cards and come back
+    scheduled. Works with or without immersive mode.
+
+    BUILD answers "could I still start from a blank page?". It needs
+    immersive mode on. Claude proposes one bounded task from your repo
+    and agrees the acceptance criteria with you BEFORE any code
+    exists, then stays out of the way. `drill done` reports how many
+    lines you wrote and reviews against those criteria.
+
+    Only one drill runs at a time. `drill cancel` drops it.
+
+
 ================================================================================
   3. TYPICAL WORKFLOWS
 ================================================================================
@@ -501,6 +600,33 @@
            Then verify again. `~/.claude/plugins/known_marketplaces.json`
            is the source of truth.
 
+
+  ------------------------------------------------------------------
+  CLAUDE REFUSES TO WRITE CODE AND MENTIONS "IMMERSIVE"
+  ------------------------------------------------------------------
+    Working as designed: you have an immersive session running.
+    Check with /socratiskill:socratic immersive status.
+
+    To get code again, pick one:
+      /socratiskill:socratic unlock <reason>   temporary (10 min)
+      /socratiskill:socratic immersive off     end the session
+
+    If a Bash command was denied and it genuinely was not writing a
+    file, it hit a false positive in the write detector — run it
+    yourself in a terminal and mention it, do not let Claude invent
+    a workaround.
+
+  ------------------------------------------------------------------
+  I CANNOT TURN THE PLUGIN OFF WHILE IMMERSIVE IS ON
+  ------------------------------------------------------------------
+    You can: the gate always allows writes to ~/.claude/socratic/,
+    so socratic off, level N, pause and immersive off all work while
+    the mode is active. If something ever does block them, the
+    filesystem escape is:
+
+      bash <plugin-root>/scripts/pause.sh
+
+    or delete the "immersive" key from ~/.claude/socratic/profile.json
 
 ================================================================================
   6. DISABLE / PAUSE / UNINSTALL

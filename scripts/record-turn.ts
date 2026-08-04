@@ -42,6 +42,7 @@ interface HintMeta {
   accompanied?: boolean
   reason?: string
   feynman_gap?: string | null
+  user_wrote?: boolean
 }
 
 interface FeynmanState {
@@ -74,6 +75,12 @@ interface TurnRecord {
   reason: string | null
   readiness: "above" | "at" | "below" | null
   diagnostic: "pass" | "fail" | null
+  /**
+   * Immersive mode only: did the USER produce code this turn? The whole
+   * point of that mode is production, so this is the signal the autonomy
+   * report is built on. null outside immersive.
+   */
+  user_wrote: boolean | null
 }
 
 interface ErrorMapEntry {
@@ -481,6 +488,7 @@ function main(): void {
     reason: meta?.reason ?? null,
     readiness,
     diagnostic,
+    user_wrote: typeof meta?.user_wrote === "boolean" ? meta.user_wrote : null,
   }
 
   const doc = loadSessionDoc()

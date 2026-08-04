@@ -1,7 +1,7 @@
 {
   "name": "socratiskill",
-  "version": "0.3.0",
-  "description": "Adaptive socratic mentor for Claude Code — teaches you to code instead of coding for you. Port of SocraticCode (OpenCode fork) with 5 user levels, hint escalation, spaced repetition, Feynman mode, and per-turn pedagogical injection via hooks.",
+  "version": "0.4.1",
+  "description": "Adaptive socratic mentor for Claude Code — teaches you to code instead of coding for you. 5 user levels, hint escalation, spaced repetition, Feynman mode, and an immersive mode that hard-blocks the agent from writing code so you keep your own skills.",
   "author": {
     "name": "Victor Barrantes"
   },

@@ -46,10 +46,29 @@ interface FeynmanSummary {
   gaps: string[]
 }
 
+interface ImmersiveSummary {
+  started_at: string
+  ended_at: string
+  duration_minutes: number
+  ended_by: "manual" | "timebox"
+  lines_added: number | null
+  lines_removed: number | null
+  repo: string | null
+  turns_total: number
+  turns_user_wrote: number
+  avg_rung: number | null
+  unlock_count: number
+  unlock_minutes: number
+  unlock_reasons: string[]
+  scaffold_lines?: number
+  scaffold_windows?: number
+}
+
 interface SessionDoc {
   date: string
   turns: TurnRecord[]
   feynman_summaries?: FeynmanSummary[]
+  immersive_summaries?: ImmersiveSummary[]
 }
 
 interface ErrorMapEntry {
@@ -183,6 +202,14 @@ function aggregateTopics(sessions: SessionDoc[]): TopicStat[] {
   return Array.from(byKey.values())
 }
 
+function gatherImmersiveSummaries(sessions: SessionDoc[]): ImmersiveSummary[] {
+  const out: ImmersiveSummary[] = []
+  for (const s of sessions) {
+    if (Array.isArray(s.immersive_summaries)) out.push(...s.immersive_summaries)
+  }
+  return out
+}
+
 function gatherFeynmanSummaries(sessions: SessionDoc[]): FeynmanSummary[] {
   const out: FeynmanSummary[] = []
   for (const s of sessions) {
@@ -249,7 +276,11 @@ function buildMarkdown(period: Period, now: Date, sessions: SessionDoc[]): strin
   lines.push("")
 
   const totalTurns = sessions.reduce((acc, s) => acc + s.turns.length, 0)
-  if (totalTurns === 0 && gatherFeynmanSummaries(sessions).length === 0) {
+  if (
+    totalTurns === 0 &&
+    gatherFeynmanSummaries(sessions).length === 0 &&
+    gatherImmersiveSummaries(sessions).length === 0
+  ) {
     const scope = period === "today" ? "today" : `this ${period}`
     lines.push(`No activity recorded ${scope}.`)
     return lines.join("\n") + "\n"
@@ -284,6 +315,46 @@ function buildMarkdown(period: Period, now: Date, sessions: SessionDoc[]): strin
   if (practiced.length > 0) {
     lines.push(`## Practiced (unevaluated)`)
     for (const s of practiced.sort((a, b) => b.null_count - a.null_count)) lines.push(formatStat(s))
+    lines.push("")
+  }
+
+  const immersive = gatherImmersiveSummaries(sessions)
+  if (immersive.length > 0) {
+    // Plain totals, no goal and no gamification. The signal the user
+    // actually asked for is the trend, so period-over-period comparison
+    // is left to reading two journals side by side rather than to a
+    // score this file would have to invent.
+    const totalMin = immersive.reduce((a, s) => a + s.duration_minutes, 0)
+    const measured = immersive.filter((s) => s.lines_added !== null)
+    const added = measured.reduce((a, s) => a + (s.lines_added ?? 0), 0)
+    const removed = measured.reduce((a, s) => a + (s.lines_removed ?? 0), 0)
+    const unlocks = immersive.reduce((a, s) => a + s.unlock_count, 0)
+    const scaffoldLines = immersive.reduce((a, s) => a + (s.scaffold_lines ?? 0), 0)
+    const scaffoldWindows = immersive.reduce((a, s) => a + (s.scaffold_windows ?? 0), 0)
+    const wrote = immersive.reduce((a, s) => a + s.turns_user_wrote, 0)
+    const turns = immersive.reduce((a, s) => a + s.turns_total, 0)
+    const rungs = immersive.filter((s) => s.avg_rung !== null).map((s) => s.avg_rung as number)
+    const avgRung =
+      rungs.length > 0 ? Math.round((rungs.reduce((a, b) => a + b, 0) / rungs.length) * 10) / 10 : null
+
+    lines.push(`## Autonomy (immersive mode)`)
+    lines.push(`- sessions: ${immersive.length} (${totalMin} min total)`)
+    if (measured.length > 0) {
+      lines.push(`- you wrote: +${added} / -${removed} lines`)
+    }
+    if (measured.length < immersive.length) {
+      lines.push(`- ${immersive.length - measured.length} session(s) not measured (not started inside a git repo)`)
+    }
+    if (scaffoldWindows > 0) {
+      lines.push(`- scaffolded by the agent: +${scaffoldLines} lines in ${scaffoldWindows} window(s), excluded above`)
+    }
+    lines.push(`- turns where you produced code: ${wrote} / ${turns}`)
+    if (avgRung !== null) lines.push(`- average ladder rung: ${avgRung} (lower = less help needed)`)
+    lines.push(`- unlocks: ${unlocks}`)
+    if (unlocks > 0) {
+      const reasons = immersive.flatMap((s) => s.unlock_reasons)
+      for (const r of reasons.slice(0, 10)) lines.push(`  - ${r}`)
+    }
     lines.push("")
   }
 

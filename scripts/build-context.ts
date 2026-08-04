@@ -21,6 +21,8 @@ import { Detector } from "./detector"
 import { Taxonomy } from "./taxonomy"
 import { HintState } from "./hint-state"
 import { Antipatterns } from "./antipatterns"
+import { Immersive } from "./immersive-state"
+import { ImmersiveReport } from "./immersive-report"
 import { readFileSync, existsSync, unlinkSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
@@ -61,10 +63,17 @@ interface FeynmanStateLite {
   gaps: string[]
 }
 
+interface DrillStateLite {
+  kind: "analyze" | "build"
+  file: string | null
+  started_at: string
+}
+
 interface SessionDocLite {
   date: string
   hint_state?: HintState.State
   feynman?: FeynmanStateLite
+  drill?: DrillStateLite
 }
 
 interface ErrorMapEntry {
@@ -107,6 +116,38 @@ function readTodaySession(): SessionDocLite | null {
   } catch {
     return null
   }
+}
+
+/** Full session doc (readTodaySession returns a lite view without turns). */
+function readTodaySessionFull(): { turns?: Array<{ ts?: string; hint_level?: number; user_wrote?: boolean | null }> } {
+  const today = new Date().toISOString().slice(0, 10)
+  const p = join(stateDir(), "sessions", `${today}.json`)
+  if (!existsSync(p)) return {}
+  try {
+    return JSON.parse(readFileSync(p, "utf-8")) as { turns?: [] }
+  } catch {
+    return {}
+  }
+}
+
+/** Archive an elapsed session's summary where the journal can find it. */
+function appendImmersiveSummary(summary: ImmersiveReport.Summary): void {
+  const today = new Date().toISOString().slice(0, 10)
+  const p = join(stateDir(), "sessions", `${today}.json`)
+  StateIO.withLock(`${p}.lock`, () => {
+    let doc: Record<string, unknown> = { date: today, turns: [] }
+    if (existsSync(p)) {
+      try {
+        doc = JSON.parse(readFileSync(p, "utf-8")) as Record<string, unknown>
+      } catch {
+        /* start fresh rather than lose the summary */
+      }
+    }
+    const list = Array.isArray(doc["immersive_summaries"]) ? (doc["immersive_summaries"] as unknown[]) : []
+    list.push(summary)
+    doc["immersive_summaries"] = list
+    StateIO.writeJsonAtomic(p, doc)
+  })
 }
 
 function readErrorMap(): ErrorMapEntry[] {
@@ -223,18 +264,82 @@ function main(): void {
 
   const activeAntipatterns = Antipatterns.getActive(Antipatterns.readState())
 
+  // Immersive mode (third axis: who holds the keyboard). Expiry is
+  // evaluated here rather than trusting the stored flag, so a timebox
+  // that elapsed while the user was away can never keep the gate shut.
+  const now = new Date()
+  const immersiveRaw = (profile as Record<string, unknown>)["immersive"]
+  const immersiveState = Immersive.isState(immersiveRaw) ? immersiveRaw : null
+  const immersiveActive = Immersive.isActive(immersiveState, now)
+  const immersiveExpired =
+    immersiveState !== null && immersiveState.active === true && Immersive.hasExpired(immersiveState, now)
+  const immersiveUnlocked = immersiveActive && Immersive.isUnlocked(immersiveState, now)
+
+  // Built when a timebox elapses, so the user gets the same autonomy
+  // report they would have gotten from `immersive off`. Ending by running
+  // out the clock is the common case; it must not be the silent one.
+  let expiredReport: string | null = null
+
+  if (immersiveExpired) {
+    try {
+      const doc = readTodaySessionFull()
+      const summary = ImmersiveReport.build(immersiveState!, doc.turns ?? [], now, "timebox")
+      expiredReport = ImmersiveReport.render(summary)
+      appendImmersiveSummary(summary)
+    } catch {
+      // A failed report must not strand the user in a mode that has
+      // already elapsed — fall through and clear the state regardless.
+    }
+
+    // Consume the elapsed session the same way challenge_next_turn is
+    // consumed: RMW under a lock, re-reading inside so we don't clobber
+    // a concurrent write from record-turn.
+    const profilePath = join(stateDir(), "profile.json")
+    try {
+      StateIO.withLock(`${profilePath}.lock`, () => {
+        const fresh = existsSync(profilePath)
+          ? (JSON.parse(readFileSync(profilePath, "utf-8")) as Record<string, unknown>)
+          : ({} as Record<string, unknown>)
+        delete fresh["immersive"]
+        StateIO.writeJsonAtomic(profilePath, fresh)
+      })
+    } catch {
+      // fail-open: leave it; next turn retries
+    }
+  }
+
   const lines: string[] = []
   lines.push("SOCRATIC CONTEXT")
   lines.push(`level: ${level} (${role})`)
   lines.push(`mode: ${mode}`)
+
+  if (immersiveActive) {
+    const left = Immersive.remainingMinutes(immersiveState!, now)
+    lines.push(`immersive: ON (${left === null ? "no timebox" : `${left} min left`})`)
+  }
   const ruleExtras: string[] = []
   if (feynman) ruleExtras.push("feynman.md")
   if (activeAntipatterns.length > 0) ruleExtras.push("antipatterns.md")
   const rulesSuffix = ruleExtras.length > 0 ? " + " + ruleExtras.join(" + ") : ""
-  lines.push(`rules: follow skills/socratic/rules/level-${level}-*.md + mode-${mode}.md + hint-ladder.md${rulesSuffix}`)
+  if (immersiveActive) {
+    // The level and mode rule files are all instructions about how to
+    // write code. They do not apply when the agent writes none.
+    lines.push(
+      `rules: follow skills/socratic/rules/immersive.md + immersive-ladder.md${rulesSuffix} (level-${level} and mode-${mode} do NOT apply while immersive)`,
+    )
+  } else {
+    lines.push(`rules: follow skills/socratic/rules/level-${level}-*.md + mode-${mode}.md + hint-ladder.md${rulesSuffix}`)
+  }
 
   if (feynman) {
     lines.push(`feynman: teaching "${feynman.topic}" since ${feynman.started_at} (${feynman.gaps.length} gaps logged)`)
+  }
+
+  const drill = session?.drill ?? null
+  if (drill) {
+    lines.push(
+      `drill: ${drill.kind}${drill.file ? ` on ${drill.file}` : ""} since ${drill.started_at}`,
+    )
   }
 
   if (primary) {
@@ -340,11 +445,30 @@ function main(): void {
       `note: FEYNMAN MODE — the USER is the teacher of "${feynman.topic}". Do NOT explain, do NOT fill gaps. Probe with concrete examples, edge cases, and "why not X". See skills/socratic/rules/feynman.md. User must run /socratiskill:socratic endteach to exit.`,
     )
   }
+  if (drill) {
+    lines.push(
+      drill.kind === "analyze"
+        ? `note: ANALYZE DRILL active on ${drill.file}. Ask ONE question per turn and wait; do not explain the file first. Grade honestly in HINT_META (vague answers are correct:false) and keep the topic slug stable so wrong answers become Leitner cards. See skills/socratic/rules/drills.md. User closes it with /socratiskill:socratic drill done.`
+        : "note: BUILD DRILL active. The acceptance criteria agreed at the start are the contract. Stay out of the way: answer at the current rung, do not volunteer, do not offer to start it off. See skills/socratic/rules/drills.md. User closes it with /socratiskill:socratic drill done.",
+    )
+  }
   if (activeAntipatterns.length > 0) {
     const ids = activeAntipatterns.map((p) => p.id).join(", ")
     lines.push(
       `note: ACTIVE ANTIPATTERNS (${ids}) — before emitting code, check if the snippet would introduce any of these. If yes, rewrite first and explain why. If the user's code contains one, call it out before building on top. See skills/socratic/rules/antipatterns.md.`,
     )
+  }
+
+  if (immersiveExpired) {
+    lines.push("")
+    lines.push(
+      "note: the user's immersive session timebox elapsed and the mode ended automatically. Show them the summary below VERBATIM, then mention they can start another with /socratiskill:socratic immersive <minutes>. Do not editorialize the numbers, do not congratulate, do not soften a low count — the honest number is the product.",
+    )
+    if (expiredReport) {
+      lines.push("--- session summary (relay verbatim) ---")
+      lines.push(expiredReport)
+      lines.push("--- end summary ---")
+    }
   }
 
   // Per-level protocol reinforcement. The rule files describe the
@@ -357,7 +481,33 @@ function main(): void {
   // block is calibrated to its pedagogical role, and attenuated in
   // `productive` mode to respect the user's request for less friction.
   // Level 5 has no block (silent colleague = default Claude Code).
-  if (level === 1) {
+  //
+  // Immersive mode takes the first branch and REPLACES the level block:
+  // every level protocol is a rule about how the agent writes code, and
+  // in immersive the agent writes none. Level still matters, but through
+  // the ladder rung, not through this block.
+  if (immersiveActive) {
+    const rungLevel = hintState
+      ? HintState.clampHint(hintState.currentLevel)
+      : HintState.getInitialHintLevel(HintState.clampUserLevel(level))
+    const rung = Immersive.rung(rungLevel)
+
+    lines.push("")
+    lines.push("--- IMMERSIVE MODE (critical, overrides the level protocol) ---")
+    lines.push("The user is deliberately training to keep their own coding ability. THIS SESSION YOU DO NOT WRITE CODE. They do.")
+    lines.push("DO NOT call Write / Edit / MultiEdit / NotebookEdit. A PreToolUse gate denies them anyway — do not fight it, and do not route around it via Bash (cat >, tee, sed -i, heredocs) or by delegating to a subagent.")
+    lines.push("DO NOT paste code blocks the user can copy. That is the same failure with extra steps: the point is that THEY produce the code, not that the code appears.")
+    lines.push(`CURRENT RUNG: ${rungLevel} (${rung.name}). ${rung.directive}`)
+    lines.push("Escalation is automatic and NOT yours to shortcut. If the user answers wrong twice, or signals they do not know, the rung rises by itself next turn. Do NOT jump to the work order because they look stuck — that is adulation wearing a helpful costume.")
+    lines.push("When the user shows you code they wrote: REVIEW it, do not rewrite it. Point at the line, name the problem, ask what they would do. Praise only something specifically good; generic encouragement is noise.")
+    lines.push("Reading and analysis are encouraged: use Read / Grep / Glob freely so your questions are grounded in THEIR actual repo, not in generic advice.")
+    lines.push("If the user asks you to just do it: remind them once that they are in immersive mode and mention /socratiskill:socratic unlock <reason>. If they insist, stop arguing — the unlock exists precisely for that.")
+    if (immersiveUnlocked) {
+      lines.push(
+        `UNLOCK ACTIVE (${Immersive.unlockRemainingMinutes(immersiveState!, now)} min left): the user deliberately bought an escape hatch. Write code normally this turn and do NOT moralize about it. Immersive rules resume by themselves when it elapses.`,
+      )
+    }
+  } else if (level === 1) {
     lines.push("")
     lines.push("--- LEVEL 1 HARD LIMITS (critical, not optional) ---")
     lines.push("DO NOT call Write / Edit / MultiEdit until the user has explicitly approved the plan in THIS turn. \"Dale\", \"ok hazlo\", \"yes\", or a specific correction count as approval. Silence does not. Past-turn approval does not — re-confirm.")
@@ -419,13 +569,24 @@ function main(): void {
   lines.push("  topic      short slug of the main concept discussed (e.g., closure, promise, useState). null if none.")
   lines.push("  correct    true if the user demonstrated understanding in THIS turn, false if they were confused or made a mistake, null if not applicable (general question, coding task with no evaluation).")
   lines.push("  domain     one of: fundamentos | lenguajes | paradigmas | web | backend | infraestructura | avanzado. null if none.")
-  lines.push("  hintLevel  0-5. 0 = pure socratic (questions only). 5 = full scaffolding. Reflect how direct THIS answer was.")
+  if (immersiveActive) {
+    // "Full scaffolding" would read as an invitation to hand over code,
+    // which is exactly what the ceiling forbids. Name the real ceiling.
+    lines.push("  hintLevel  0-5, the immersive ladder rung you actually used. 0 = pure socratic (questions only). 5 = full work order (spec, never code). Reflect how much you gave away THIS turn.")
+  } else {
+    lines.push("  hintLevel  0-5. 0 = pure socratic (questions only). 5 = full scaffolding. Reflect how direct THIS answer was.")
+  }
   lines.push(`  readiness  (optional) "above" | "at" | "below" | null. Your judgment of whether the user's answer operated above, at, or below their current level ${level}. "above" means the user showed dominance beyond what level ${level} requires; "below" means they struggled with a level-${level} concept. null if unclear or not applicable.`)
   if (feynman) {
     lines.push('  feynman_gap  (REQUIRED while feynman mode is active) short phrase describing a gap revealed by the user this turn, or null if the explanation was solid. Example: "confuses then() with await".')
   }
   if (diag) {
     lines.push(`  diagnostic  (REQUIRED this turn — diagnostic mode is active) "pass" | "fail" | null. pass = the user's answer demonstrated level-${diag.target_level} understanding; fail = it did not; null = off-topic / not applicable this turn.`)
+  }
+  if (immersiveActive) {
+    lines.push(
+      '  user_wrote  (REQUIRED while immersive is active) true | false | null. true if the USER produced or modified code this turn (pasted it, described what they wrote, or said they implemented it); false if the turn passed with no code produced by them; null if not applicable (planning, questions, analysis).',
+    )
   }
   lines.push("The block is for telemetry only — the user does not read it. Keep valid JSON.")
 

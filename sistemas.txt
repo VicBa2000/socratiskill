@@ -7,8 +7,7 @@ down), per-turn detectors, domain taxonomy, antipatterns, Feynman
 mode, spaced repetition, hooks, persistent state, and plugin
 states.
 
-Updated after the balanced anti-adulation bundle (A + B + E,
-April 2026).
+Updated after immersive mode (v0.4, August 2026).
 
 
 TABLE OF CONTENTS
@@ -35,6 +34,14 @@ TABLE OF CONTENTS
  12. Injection channels (hooks)
  13. Persistent state (files)
  14. Plugin states (enabled / paused / disabled / reset)
+ 15. Immersive mode (v0.4) — the third axis
+       15.1 Why the other axes do not solve it
+       15.2 The gate (hard enforcement)
+       15.3 The immersive ladder
+       15.4 Unlock
+       15.5 Autonomy report
+       15.6 Drills
+       15.7 Scaffold window (v0.4.1)
 
 
 ================================================================
@@ -1055,7 +1062,263 @@ Four states orthogonal to level/mode/hint:
 
 
 ================================================================
-APPENDIX — RECENT CHANGES (April 2026)
+15. IMMERSIVE MODE (v0.4) — THE THIRD AXIS
+================================================================
+
+15.1 WHY THE OTHER AXES DO NOT SOLVE IT
+
+  Levels 1-5 and modes learn/productive vary ONE dimension: how
+  much the agent explains while it writes your code. In all ten
+  combinations the agent writes it. rules/mode-learn.md, at the
+  most pedagogical level that exists, literally reads "BEFORE
+  invoking Write, Edit, or MultiEdit..." — level 1 also writes
+  your code, it just warns you first.
+
+  That optimizes passive comprehension. It does nothing for a
+  developer who understands everything the agent does and has
+  stopped producing code themselves. Recognition stays sharp
+  while recall decays, and the first masks the loss of the second
+  — which is why the decay goes unnoticed until there is no agent
+  available.
+
+  Immersive mode is therefore not a level and not a mode value.
+  It is an orthogonal axis: WHO HOLDS THE KEYBOARD.
+
+    axis 1  level (1-5)             -> how much it explains
+    axis 2  mode (learn|productive) -> how much friction
+    axis 3  immersive               -> WHO WRITES THE CODE
+
+  Scope: one session, optionally timeboxed. Deliberate training,
+  not a permanent setting — a global always-on mode gets switched
+  off the first Friday it collides with a deadline, and then the
+  whole thing dies.
+
+  State: profile.immersive = { active, started_at,
+  expires_at|null, unlocks[], baseline_hint, git_baseline }.
+  Absent = normal mode, so every pre-v0.4 profile keeps working
+  untouched.
+
+  Expiry is evaluated on every read rather than trusted from the
+  flag. A timebox that elapsed while the user was away must never
+  keep the gate shut — a lock the user cannot open is the worst
+  failure mode this feature has.
+
+15.2 THE GATE (HARD ENFORCEMENT)
+
+  hooks/hooks.json registers a PreToolUse hook. This is the only
+  hard enforcement in the whole plugin; everything else is text
+  the model may or may not obey.
+
+  Denied while immersive is active and no unlock is live:
+    - Write / Edit / MultiEdit / NotebookEdit
+    - Agent / Task (a subagent writing on your behalf is you
+      writing)
+    - Bash commands that write files: shell redirection, tee,
+      sed|perl|ruby -i, awk -i inplace, dd of=, truncate, patch,
+      git apply, and node/python inline writers.
+
+  Allowed on purpose: everything else in Bash. The user NEEDS to
+  run their own tests, git, builds and linters — a false positive
+  there makes the mode unusable, so the detector is deliberately
+  conservative and excludes /dev/null and file-descriptor
+  redirections (2>&1, >&2), which are plumbing, not authoring.
+
+  ALWAYS allowed: writes inside the socratic state dir. socratic
+  off, level N and challenge all mutate profile.json through the
+  Write tool, so gating that path would put the key inside the
+  locked room. The exemption compares on a separator boundary and
+  resolves .. segments, so neither a sibling directory with a
+  similar name nor a traversal can smuggle a write through it.
+
+  Denial format (validated empirically, Tarea I.0.1):
+    {"hookSpecificOutput":{"hookEventName":"PreToolUse",
+      "permissionDecision":"deny","permissionDecisionReason":".."}}
+  The tool never runs and the model receives the reason verbatim.
+  exit 2 + stderr also blocks, but wraps the message in
+  "PreToolUse:<Tool> hook error: [<command>]:" — fallback only.
+
+  Cost: the hook fires on every Write/Edit/Bash of every session,
+  immersive or not. The off path is written in bash builtins only
+  ($(<file), substring test, no cat/grep) and costs ~98ms on Git
+  Bash for Windows, of which ~64ms is bash startup itself.
+
+  Fail-open everywhere: no profile, enabled=false, expired
+  timebox, live unlock, or any exception at all lets the call
+  through. A gate that misfires and blocks real work gets the
+  whole plugin uninstalled.
+
+15.3 THE IMMERSIVE LADDER
+
+  The hint ladder (section 4) drives it unchanged: +1 rung after
+  2 consecutive failures, jump to 5 on a zero-knowledge signal,
+  jump-down on success. Only the MEANING of each rung changes,
+  because "more help" can no longer mean "more code".
+
+    0  Pure socratic   ask only
+    1  Orientation     name the file/module, not what to do in it
+    2  Analogy         point at a case ALREADY SOLVED in their repo
+    3  Reduction       ordered subproblems, solve none of them
+    4  Explanation     prose + make them restate it before coding
+    5  Work order      files, signatures, acceptance criteria,
+                       edge cases, order. STILL NOT CODE.
+
+  Litmus test, applied to all six rungs: if the user could copy
+  the response into their editor and get working code, the turn
+  failed.
+
+  Rung 5 is defined by its negative space too — no code blocks,
+  no line-by-line pseudocode, no function bodies, no complete
+  regex or SQL. That is where the pressure to hand over the
+  answer peaks, so it needed the explicit negative definition.
+
+  Rung 2 deviates from the normal ladder: instead of a generic
+  analogy it requires pointing at solved code in the user's own
+  repo. The agent has Read/Grep; a supermarket-queue analogy
+  wastes that and teaches nothing about navigating the codebase.
+
+  While immersive is active the level and mode rule files do NOT
+  apply, and the injected rules line says so explicitly. The
+  level survives only as the rung the ladder starts on: a novice
+  opens near the work order, an expert opens with one question.
+
+15.4 UNLOCK
+
+  /socratiskill:socratic unlock <reason> — 10 min by default,
+  unlock <N> <reason> for N. Reason is mandatory. Logged as
+  {at, reason, minutes} in immersive.unlocks[].
+
+  While live the gate stands down completely; it re-arms by
+  itself when the window elapses.
+
+  SKILL.md and rules/immersive.md both carry an explicit rule: do
+  NOT editorialize when the user unlocks. No "are you sure", no
+  reminder of their goals, no disappointment. Real work has real
+  deadlines; a lock with no exit is a lock that gets uninstalled.
+  The log is the accountability, not the model's commentary.
+
+  This is the same principle as the anti-adulation bundle from
+  v0.3, pointed the other way: flattery and scolding are both
+  failures to respect what the user decided.
+
+15.5 AUTONOMY REPORT
+
+  Printed on immersive off AND on timebox expiry (ending by the
+  clock is the common case and must not be the silent one), then
+  archived to sessions/<date>.json under immersive_summaries[].
+  build-journal.ts aggregates it under "## Autonomy".
+
+  HARD SIGNAL: git. With the gate closed the agent cannot write,
+  so whatever appeared in the working tree came from the user.
+
+    lines = diff(baseline_head..HEAD)  committed in the session
+          + diff(HEAD)                 currently uncommitted
+          - baseline.worktree          what was already dirty
+
+  The naive "diff now minus diff then" goes NEGATIVE the moment
+  the user commits, because committing moves HEAD and resets the
+  working-tree diff — precisely when they were most productive.
+
+  worktreeStat cuenta ademas los archivos NO TRACKEADOS (git
+  ls-files --others --exclude-standard). git diff HEAD solo ve lo
+  trackeado, y en este modo crear archivos nuevos es el caso comun:
+  sin eso, el trabajo que el modo existe para producir se contaba
+  como cero. Bug real encontrado en el primer uso, no por los tests.
+
+  Soft signals alongside it: average ladder rung, turns with
+  user_wrote=true over total, unlock count and reasons.
+
+  HONESTY: during an unlock the agent CAN write, and those lines
+  land in the same working tree. There is no cheap way to
+  attribute them, so the report SAYS SO instead of implying a
+  clean number.
+
+  No gamification: no badges, no goals, no streak celebration,
+  and an explicit instruction to the model not to soften a low
+  count. Trend is read by comparing two journals; a composite
+  score would be a number this plugin invented rather than
+  measured.
+
+15.6 DRILLS
+
+  drill analyze [<file>] — the user is quizzed on existing code.
+  Works with or without immersive mode; reading was never the
+  restricted thing, and analysis is half of what the user fears
+  losing.
+
+  Selection is DETERMINISTIC and belongs to the script, not the
+  model: asked to pick a file for a quiz, a model reliably picks
+  something short and convenient, and the user cannot steer it
+  either. Heuristic: git-tracked source files, 25-500 lines,
+  excluding node_modules/dist/build/vendor/migrations and
+  generated or lock files, rotating over the last 10 drills.
+
+  Protocol: read the whole file, then ONE question per turn,
+  escalating from "what does it do" to "what breaks if I remove
+  this". The last two question types are the ones that matter —
+  "what does it do" is recognition. Wrong answers become Leitner
+  cards under a stable topic slug, and the existing spaced-
+  repetition machinery does the rest with no new code.
+
+  drill build — the user implements a bounded task from a blank
+  page. REQUIRES immersive mode: a build drill with the agent
+  free to write is not a drill. Captures a git baseline and
+  reports lines written on drill done.
+
+  Acceptance criteria must be agreed BEFORE any code exists.
+  That is what makes the closing review objective instead of a
+  matter of taste.
+
+  Both: never do the exercise for them, silence is allowed, and a
+  failed drill is a successful measurement — it found something
+  they had lost.
+
+15.7 SCAFFOLD WINDOW (v0.4.1)
+
+  PROBLEMA: tipear el esqueleto (index.html vacio, package.json,
+  tsconfig) no entrena nada y quema los minutos mas caros de una
+  sesion en lo que menos vale. Es el RI-1 (adopcion) materializado.
+
+  LA TRAMPA EVITADA: que el nivel module QUE puede escribir el
+  agente, o una regla blanda tipo "si te lo pide explicitamente,
+  crea la estructura". Ambas delegan en el MODELO la frontera entre
+  boilerplate y codigo formativo. Esa frontera no es definible en
+  codigo y el gradiente del modelo la ensancha hasta tragarse la
+  feature (Tarea 10.A.2: nivel 1 escribio 378 lineas pese a limites).
+
+  REGLA: el modelo PROPONE, solo el usuario CONCEDE. La ventana la
+  abre un comando; una frase en prosa no.
+
+  LA LINEA ENFORZABLE: crear vs editar. Que un archivo exista es un
+  HECHO que el gate verifica; "esto es lo bastante aburrido" es un
+  juicio. Con la ventana abierta:
+    Write a archivo inexistente  -> permitido (dentro del tope)
+    Write a archivo existente    -> denegado (es un Edit)
+    Edit / MultiEdit             -> denegado siempre
+    Bash-write / subagentes      -> denegado siempre
+
+  TOPES (data/algorithm.json): archivos por nivel L1:2 ... L5:12,
+  80 lineas por archivo (plano), ventana de 20 min. Cierra por lo
+  primero que ocurra: cupo, tiempo, o fin de la sesion.
+  El nivel escala el TAMANO, nunca la categoria — a un novato tipear
+  boilerplate si le construye fluidez.
+
+  CONTABILIDAD: el gate deja de ser solo-lectura. Cuenta al PERMITIR,
+  no al completar (sobrecuenta si la escritura falla despues; el
+  error corre contra el usuario, no a favor). Usa el lock de
+  profile.json y es best-effort: nunca bloquea una escritura
+  permitida por no poder actualizar un contador.
+
+  GANANCIA SOBRE EL UNLOCK: con unlock las lineas del agente son
+  indistinguibles de las del usuario en el mismo working tree y el
+  reporte solo puede confesar la contaminacion. Con scaffold el gate
+  vio cada archivo que permitio, asi que la resta es exacta.
+
+  scaffolds[] se guarda APARTE de unlocks[]: scaffolding es parte
+  legitima del flujo, rendirse no, y un solo contador no puede
+  significar las dos cosas sin volverse inutil.
+
+================================================================
+APPENDIX — RECENT CHANGES
 ================================================================
 
 "Per-level protocol" bundle (option C + mode sensitivity):
@@ -1079,4 +1342,58 @@ Tests added:
   S23 (6 asserts): depth diversity floor + anti-adulation
                    injection + anti-leak.
 
-Current total: 90 functional + 40 security = 130 tests green.
+Current total: 181 functional + 40 security = 221 tests green.
+
+
+v0.4.1 — SCAFFOLD WINDOW (August 2026)
+
+New: the scaffold window (section 15.7). No new files — it lives in
+immersive-state.ts, immersive.ts, gate-tool.ts, immersive-report.ts,
+build-journal.ts, algorithm.json, rules/immersive.md and SKILL.md.
+
+The gate stops being read-only: it now counts files and lines against
+the open window, under the profile lock.
+
+Bug found on first real use:
+  - worktreeStat only counted TRACKED files, so a brand-new file the
+    user wrote reported as +0 lines. In immersive mode creating files
+    is the common case, so the metric was systematically missing the
+    work the mode exists to produce. Present since v0.4; none of the
+    13 asserts in S27 caught it because they all modify an already
+    committed file. Fixed by adding `git ls-files --others
+    --exclude-standard`.
+
+Tests: 197 functional + 40 security = 237 green.
+
+
+v0.4 — IMMERSIVE MODE (August 2026)
+
+New: the third axis (section 15). PreToolUse gate, re-read ladder,
+unlock, git-based autonomy report, analyze/build drills.
+
+New files:
+  scripts/hook-pre-tool.sh      PreToolUse entrypoint
+  scripts/gate-tool.ts          the gate engine
+  scripts/immersive-state.ts    pure state + ladder definitions
+  scripts/immersive.ts          on/off/status/unlock CLI
+  scripts/immersive-report.ts   git measurement + rendering
+  scripts/drill.ts              drill selection and state
+  skills/socratic/rules/immersive.md
+  skills/socratic/rules/immersive-ladder.md
+  skills/socratic/rules/drills.md
+
+Changed:
+  hooks/hooks.json              PreToolUse registered
+  build-context.ts              immersive block replaces the level
+                                block, drill notes, expiry report
+  record-turn.ts + state-io.ts  user_wrote telemetry
+  build-journal.ts              Autonomy section
+
+Bugs found while building it:
+  - test harness had errexit leaking on since 2026-04-20 (three
+    stray `set -e` restores in a suite that runs errexit-off).
+  - drill.ts countLines counted the phantom line after a trailing
+    newline; every well-formed file read one line too long.
+  - the gate initially blocked writes to profile.json, which is how
+    `socratic off` works — the mode could lock you out of its own
+    off switch. Fixed with a boundary- and traversal-safe exemption.
