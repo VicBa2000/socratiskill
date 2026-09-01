@@ -219,6 +219,16 @@ const BANNED: Banned[] = [
     why: "the minutes come FIRST; this form silently swallows the number into the reason",
     roots: ["skills", "README.md", "QUICKSTART.txt", "MANUAL-TEST.md"],
   },
+  {
+    // Both CLAUDE.md and sistemas.txt described this script, and the
+    // SessionStart hook that would run it, in enough detail to be
+    // believed. Neither ever existed. The manifest registers exactly
+    // three events. Banning the FILENAME rather than the word lets the
+    // reference keep explaining that the hook is absent.
+    pattern: /hook-session-start/i,
+    why: "there is no SessionStart hook; the manifest registers UserPromptSubmit, PreToolUse and Stop",
+    roots: ["skills", "hooks", "README.md", "QUICKSTART.txt", "MANUAL-TEST.md", "sistemas.txt"],
+  },
 ]
 
 function walk(p: string, out: string[] = []): string[] {

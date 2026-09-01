@@ -162,6 +162,19 @@
   Do NOT mix both — running install.sh AND installing as a plugin
   would register the hooks twice, doubling the token cost per turn.
 
+  >> WARNING: THE LEGACY PATH DOES NOT REGISTER THE GATE. <<
+  install.sh writes only the UserPromptSubmit and Stop entries. The
+  PreToolUse hook — the one that turns your level into enforcement
+  instead of a suggestion — comes from the plugin manifest
+  (hooks/hooks.json) and is NOT written to settings.json.
+
+  What that means in practice: at levels 2-5 the mentor still TELLS
+  Claude it may not edit your files, and Claude will mostly comply,
+  but nothing STOPS it. And it fails silently — an advisory level
+  looks identical to an enforced one right up until Claude writes a
+  body you were supposed to write. If you want the axis enforced,
+  use Path A or Path B Step 2 above.
+
 
 ================================================================================
   2. QUICK USAGE (every command, by example)

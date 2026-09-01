@@ -7,7 +7,7 @@ per-turn detectors, domain taxonomy, antipatterns, Feynman mode,
 spaced repetition, hooks, persistent state, plugin states, and the
 authorship gate.
 
-Updated after drill fix (v0.5.1, September 2026).
+Updated after the shape-check vocabulary fix (v0.5.2, September 2026).
 
 
 TABLE OF CONTENTS
@@ -848,13 +848,16 @@ adds them to ~/.claude/settings.json as a marker-delimited block
     8. Runs evaluateCalibration and sets pending_diagnostic or
        pending_calibration_change as appropriate.
 
---- SessionStart (on Claude Code open) ---
+--- There is no SessionStart hook ---
 
-  Script: scripts/hook-session-start.sh.
+  An earlier draft of this reference described one, in enough detail
+  to be believed, pointing at a bootstrap script under scripts/ that
+  was never written. The manifest registers exactly three events —
+  UserPromptSubmit, PreToolUse and Stop — and nothing else.
 
-  Lightweight bootstrap: creates state directories if missing.
-  Does not inject anything to the model in this hook — that is
-  UserPromptSubmit's job on the first turn.
+  State directories are created lazily by whichever script needs
+  them first, so the bootstrap the SessionStart hook was meant to do
+  has no work left to perform.
 
 
 ================================================================
@@ -1036,8 +1039,40 @@ exist and putting the whole implementation inside it.
   every honest scaffold. Everything unrecognized is treated as CODE,
   which is the strict side.
 
-  KNOWN ROUGH EDGE: .sql sits in the code class. CREATE TABLE is
-  structure but a stored procedure IS the implementation.
+  VOCABULARY (v0.5.2). Failing closed is safe, but it is only USABLE
+  if the recognizer speaks the language in front of it. Measuring
+  that showed the original regexes spoke FOUR languages — TS/JS,
+  Python, C#, Java — while code_extensions listed twenty. Nine of
+  thirteen honest skeletons were denied, and since the allowance is 0
+  at levels 3-5 a single false positive kills the whole file: eleven
+  extensions were effectively unusable. There were zero false
+  negatives, so the design was right and only the vocabulary was
+  missing.
+
+  The fix added vocabulary, NOT a softer polarity, under two rules:
+
+    - LANGUAGE-SPECIFIC RULES ARE GATED BY EXTENSION. A rule that has
+      to be loose to be useful (SQL column definitions, Go's
+      colon-less struct fields) runs only for its own language, so it
+      cannot loosen TypeScript. "generic" is the strict fallback and
+      is what any unrecognized extension gets. The language comes
+      from the PATH, never the content — otherwise the agent could
+      pick its own ruleset by writing a shebang.
+    - EVERY LOOSE RULE IS GUARDED BY A STATEMENT-KEYWORD DENYLIST.
+      `Email string` and `return nil` have the same two-token shape;
+      the keyword that introduces execution is the only thing that
+      separates them, and the denylist is checked first.
+
+  For .sql specifically: DDL (CREATE/ALTER/DROP of a schema object),
+  column definitions, procedure parameters and session pragmas are
+  structure. SELECT/INSERT/UPDATE/DELETE/MERGE/EXEC stay statements,
+  so the BODY of a stored procedure is still the user's to write —
+  which is the point.
+
+  Scenario S36 measures both directions and will not pass a checker
+  that simply denies everything; tests/fixtures/shape-why.ts pins 60
+  line-level contracts so a widened regex cannot quietly swallow a
+  statement.
 
 LAYER 3 — DAILY BUDGET. Does not prevent, it bounds the blast
 radius: N new files per UTC day by level, 80 lines each. Replaces

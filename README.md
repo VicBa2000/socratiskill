@@ -150,6 +150,14 @@ bash ~/socratiskill/scripts/install.sh
 
 This verifies `bun` + `node`, seeds `profile.json` with defaults, and
 writes the hook entries to `~/.claude/settings.json` (idempotent).
+
+> **This path registers `UserPromptSubmit` and `Stop` only — not
+> `PreToolUse`, which is the gate.** Without it the axis still *tells*
+> Claude what it may author, but nothing *enforces* it: levels 2-5
+> degrade to advice, and they degrade silently, because a level that is
+> merely suggested looks exactly like one that is enforced until the
+> moment Claude writes something it should not have. Prefer the plugin
+> install above, which registers all three from `hooks/hooks.json`.
 Use this **only** if you are not installing as a plugin — otherwise
 you would register the hooks twice and they would fire 2× per turn.
 

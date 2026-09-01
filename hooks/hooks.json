@@ -1,5 +1,5 @@
 {
-  "description": "Socratiskill — registers UserPromptSubmit and Stop hooks at plugin install time. Replaces the manual scripts/install-hooks.sh approach so the hooks fire in every project, regardless of project-local .claude/settings.json overrides.",
+  "description": "Socratiskill — registers the UserPromptSubmit, PreToolUse and Stop hooks at plugin install time. Replaces the manual scripts/install-hooks.sh approach so the hooks fire in every project, regardless of project-local .claude/settings.json overrides. PreToolUse is the one that enforces the axis: it is the gate, so leaving it out of this list is not a documentation detail.",
   "hooks": {
     "UserPromptSubmit": [
       {
