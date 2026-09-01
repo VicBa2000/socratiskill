@@ -164,21 +164,280 @@
 
 
 ================================================================================
-  2. HOW TO USE (daily cheatsheet)
+  2. QUICK USAGE (every command, by example)
+================================================================================
+
+  Everything goes through /socratiskill:socratic <subcommand>. Nothing
+  here needs a flag or a config file — copy a line, paste it, done.
+
+  If you only ever remember three:
+
+    /socratiskill:socratic                     where am I right now
+    /socratiskill:socratic level 3             how much of the work is mine
+    /socratiskill:socratic ship prod is down   get out of the way, 10 min
+
+
+  ------------------------------------------------------------------
+  2.1 THE ONE DIAL: `level`
+  ------------------------------------------------------------------
+  The level answers ONE question: how much of the work is YOURS?
+  Higher = the agent does LESS. It is not "how much it explains".
+
+    /socratiskill:socratic level 1   Implementer — it writes, you read
+                                     and get questioned about it
+    /socratiskill:socratic level 2   Framer — it writes structure and
+                                     trivial bodies; the load-bearing
+                                     logic is yours
+    /socratiskill:socratic level 3   Architect — it writes skeletons and
+                                     signatures; EVERY body is yours
+    /socratiskill:socratic level 4   Guide — it writes nothing; it breaks
+                                     the problem down and points at prior
+                                     art in your repo
+    /socratiskill:socratic level 5   Socratic — it writes nothing and
+                                     directs nothing. It asks.
+
+  What you get back:
+
+    level updated: 2 -> 3 (architect)
+
+  At levels 2-5 the agent may CREATE files but never EDIT yours, and
+  what it creates is capped:
+
+    level 2   8 new files/day    up to 8 executable statements each
+    level 3   6 new files/day    0 statements — skeletons only
+    level 4   4 new files/day    0 statements
+    level 5   3 new files/day    0 statements
+
+  Every new file is also capped at 80 lines, at every level.
+
+  If a level ever feels wrong, do not fight it — change it. The wrong
+  level is the single most common reason this plugin feels annoying
+  instead of useful.
+
+
+  ------------------------------------------------------------------
+  2.2 WHEN YOU JUST NEED THE CODE NOW: `ship`
+  ------------------------------------------------------------------
+  A logged, expiring escape. The agent writes normally until it runs
+  out, then the level re-arms by itself. No nagging, no confirmation
+  prompt, no comment on your choice.
+
+    /socratiskill:socratic ship prod is down
+        -> escape open for 10 min. logged: prod is down
+
+    /socratiskill:socratic ship 25 demo del viernes
+        -> escape open for 25 min. logged: demo del viernes
+
+  GOTCHA — THE MINUTES GO FIRST, not last. A leading number is read as
+  the duration:
+
+    ship 3 things broke       -> 3 MINUTES, reason "things broke"
+    ship three things broke   -> 10 minutes (default), full reason kept
+
+  A reason is required; it is the whole accountability mechanism.
+
+    /socratiskill:socratic ship        -> error: a reason is required
+
+  Inspect or close one early:
+
+    bun run <plugin>/scripts/escape.ts --status
+    bun run <plugin>/scripts/escape.ts --end
+
+  `ship` is a no-op at levels 1 and 6 — the agent already writes freely
+  there, so there is nothing to escape from.
+
+
+  ------------------------------------------------------------------
+  2.3 MID-CONVERSATION NUDGES
+  ------------------------------------------------------------------
+  These move the hint ladder inside the CURRENT problem. They do not
+  change your level — getting stuck on one bug should not demote you.
+
+    /socratiskill:socratic hint       one rung more direct (+1)
+    /socratiskill:socratic faster     same thing, different name
+    /socratiskill:socratic slower     two rungs more socratic (-2)
+
+  `slower` is deliberately twice as strong as `hint`: it is easy to
+  drift into being spoon-fed one rung at a time, and hard to climb back.
+
+    /socratiskill:socratic challenge
+
+  Arms anti-adulation for your NEXT message only. Use it when you want
+  your idea attacked instead of praised — the agent goes looking for
+  what is wrong with it rather than agreeing with you.
+
+
+  ------------------------------------------------------------------
+  2.4 DELIBERATE PRACTICE: `drill`
+  ------------------------------------------------------------------
+  Exercises drawn from YOUR repo, not from a textbook.
+
+    /socratiskill:socratic drill analyze
+        You get quizzed on code that already exists. The script picks
+        the file on rotation. Works at ANY level — reading was never
+        the restricted half.
+
+    /socratiskill:socratic drill analyze src/auth/session.ts
+        Same, on a file you choose.
+
+    /socratiskill:socratic drill build
+        You implement a bounded task from scratch. Needs level 3+;
+        below that the agent writes the bodies and the drill measures
+        nothing.
+
+    /socratiskill:socratic drill fix
+        The one that trains the skill nobody practices: LOCATING a
+        change in code you did not write. You get a concrete change
+        request and have to work out WHERE it goes before any code is
+        written. The agent will not name the function or quote the
+        line — that IS the exercise. Needs level 3+.
+
+    /socratiskill:socratic drill status    what is running
+    /socratiskill:socratic drill done      close it (build and fix
+                                           report the lines you wrote)
+    /socratiskill:socratic drill cancel    abandon it
+
+  The agent never edits your files to plant a bug for you to find. A
+  manufactured exercise is worse than no exercise, so it works on the
+  code exactly as it is.
+
+
+  ------------------------------------------------------------------
+  2.5 TEACH IT BACK: `teach` / `endteach`
+  ------------------------------------------------------------------
+  Role inversion (Feynman). You explain, it probes for the gaps.
+
+    /socratiskill:socratic teach event loop
+    /socratiskill:socratic teach por que un indice acelera un JOIN
+        ... you explain; it asks until something does not hold up ...
+    /socratiskill:socratic endteach
+        -> prints the gaps it found; the journal harvests them
+
+  One session at a time — running `teach` while one is open tells you
+  to `endteach` first.
+
+
+  ------------------------------------------------------------------
+  2.6 SPACED REPETITION: `review`
+  ------------------------------------------------------------------
+    /socratiskill:socratic review
+
+  Pulls one card that is due (Leitner) and asks ONE verifiable question
+  about it. If nothing is due you get exactly:
+
+    no review cards due
+
+  Cards are created automatically from what you got wrong. You never
+  add them by hand.
+
+
+  ------------------------------------------------------------------
+  2.7 WHAT YOU ACTUALLY DID: `status` / `journal`
+  ------------------------------------------------------------------
+    /socratiskill:socratic            same as `status`
+    /socratiskill:socratic status     level, whether it is on, streak,
+                                      budget left today, autonomy
+
+  The autonomy number is measured from git, not from the agent's
+  opinion of you: while the gate is armed the agent cannot edit, so
+  whatever shows up in the working tree came from your hands. It is
+  reported with no congratulation and no softening — an honest number
+  you can act on is the entire product.
+
+    /socratiskill:socratic journal today
+    /socratiskill:socratic journal week
+    /socratiskill:socratic journal month
+
+  Regenerates from the session files and prints it; also writes
+  ~/.claude/socratic/journal/<file>.md for later.
+
+
+  ------------------------------------------------------------------
+  2.8 CALIBRATION: `calibrate` / `accept`
+  ------------------------------------------------------------------
+    /socratiskill:socratic calibrate
+
+  Run once on a fresh install: a short self-assessment plus one
+  question, and it sets your starting level.
+
+  After that the plugin watches how you do and may SUGGEST a change. It
+  never moves you on its own:
+
+    /socratiskill:socratic accept     apply the suggested change
+
+  If nothing is pending it says so and changes nothing. Calibration
+  clamps at 5 and can never promote you to 6 by any path — a plugin
+  that promoted you to "the agent does everything" would be sabotaging
+  itself.
+
+
+  ------------------------------------------------------------------
+  2.9 TURNING IT OFF (three different strengths)
+  ------------------------------------------------------------------
+    /socratiskill:socratic off        soft mute, ~30 tokens/turn,
+                                      instant, state kept
+    /socratiskill:socratic on         undo `off`
+
+    /socratiskill:socratic pause      true bypass, ZERO tokens/turn,
+                                      state kept
+    /socratiskill:socratic resume     undo `pause`
+
+  Both survive across sessions and both are idempotent. Reach for
+  `pause` when you want it genuinely invisible for a stretch of work
+  without losing your level, streak or error-map.
+
+  Heavier hammers, in order:
+
+    /plugin disable socratiskill      no hooks at all
+    /plugin uninstall socratiskill    full removal
+
+    /socratiskill:socratic reset      DESTRUCTIVE — wipes profile,
+                                      journal, error-map, sessions
+                                      and antipatterns
+    /socratiskill:socratic reset force   same, skipping the prompt
+
+  Bare `reset` only asks for confirmation; it writes nothing until you
+  pass `force`.
+
+
+  ------------------------------------------------------------------
+  2.10 A REALISTIC FIRST HOUR
+  ------------------------------------------------------------------
+    /socratiskill:socratic calibrate         once, ever
+    /socratiskill:socratic                   see where it put you
+    /socratiskill:socratic level 3           skeletons only; bodies mine
+
+    ... work normally. Ask for a new module. The agent creates the file
+        with imports, types, signatures and a TODO in each body, then
+        stops. You fill the bodies. It cannot edit that file afterwards,
+        so what lands in the tree is yours. ...
+
+    /socratiskill:socratic slower                    too direct
+    /socratiskill:socratic ship 15 pipeline is red   real deadline
+    /socratiskill:socratic drill fix                 train locating
+    /socratiskill:socratic journal today             what happened
+
+  If it feels bureaucratic rather than useful, the level is probably
+  wrong for what you are doing today. Move it. That is what it is for.
+
+
+================================================================================
+  3. HOW TO USE (daily cheatsheet)
 ================================================================================
 
   Everything is dispatched through /socratiskill:socratic <subcommand>.
 
   ------------------------------------------------------------------
-  2.1 CHECK YOUR CURRENT STATE
+  3.1 CHECK YOUR CURRENT STATE
   ------------------------------------------------------------------
     /socratiskill:socratic              -> status (same as below)
-    /socratiskill:socratic status       -> enabled, level, mode, streak
+    /socratiskill:socratic status       -> enabled, level, streak,
+                                           budget left today, autonomy
 
     Reads: ~/.claude/socratic/profile.json
 
   ------------------------------------------------------------------
-  2.2 TURN THE MENTOR ON / OFF / PAUSE
+  3.2 TURN THE MENTOR ON / OFF / PAUSE
   ------------------------------------------------------------------
     /socratiskill:socratic off          -> SOFT mute (hook still runs;
                                            injects ~30-token DISABLED
@@ -209,7 +468,7 @@
     to script it from a CI / wrapper.
 
   ------------------------------------------------------------------
-  2.3 CHANGE THE LEVEL
+  3.3 CHANGE THE LEVEL
   ------------------------------------------------------------------
     /socratiskill:socratic level 3      -> set the axis (1..5)
 
@@ -263,11 +522,11 @@
 
     `mode learn` / `mode productive` are GONE. They said the same
     thing the level now says, and "I need to ship right now" is
-    covered by `ship` (see 2.9).
+    covered by `ship` (see 3.9).
 
   ------------------------------------------------------------------
   ------------------------------------------------------------------
-  2.4 ASK FOR MORE / LESS GUIDANCE DURING A CONVERSATION
+  3.4 ASK FOR MORE / LESS GUIDANCE DURING A CONVERSATION
   ------------------------------------------------------------------
     /socratiskill:socratic hint         -> raise scaffolding (+1)
     /socratiskill:socratic faster       -> same as hint (alias, less filler)
@@ -278,7 +537,7 @@
     escalation (based on correct/wrong answers) continues in parallel.
 
   ------------------------------------------------------------------
-  2.5 TEACH SOMETHING TO CLAUDE (Feynman mode)
+  3.5 TEACH SOMETHING TO CLAUDE (Feynman mode)
   ------------------------------------------------------------------
     /socratiskill:socratic teach <topic>
     ... (you explain; Claude probes with questions, doesn't teach) ...
@@ -297,7 +556,7 @@
     Gaps go to the session file and later to the daily journal.
 
   ------------------------------------------------------------------
-  2.6 REVIEW PAST MISTAKES (spaced repetition, Leitner)
+  3.6 REVIEW PAST MISTAKES (spaced repetition, Leitner)
   ------------------------------------------------------------------
     /socratiskill:socratic review
 
@@ -310,7 +569,7 @@
       "no review cards due"
 
   ------------------------------------------------------------------
-  2.7 SEE WHAT YOU ACTUALLY LEARNED (journal)
+  3.7 SEE WHAT YOU ACTUALLY LEARNED (journal)
   ------------------------------------------------------------------
     /socratiskill:socratic journal              -> daily (today)
     /socratiskill:socratic journal week         -> ISO week (Mon-Sun)
@@ -322,7 +581,7 @@
     ~/.claude/socratic/journal/.
 
   ------------------------------------------------------------------
-  2.8 ACCEPT A CALIBRATION SUGGESTION
+  3.8 ACCEPT A CALIBRATION SUGGESTION
   ------------------------------------------------------------------
     The level-up pipeline is intentionally conservative to avoid
     premature / sycophantic promotions. In order, to climb from
@@ -358,7 +617,7 @@
 
 
   ------------------------------------------------------------------
-  2.9 WHEN YOU NEED TO SHIP RIGHT NOW
+  3.9 WHEN YOU NEED TO SHIP RIGHT NOW
   ------------------------------------------------------------------
     /socratiskill:socratic ship "prod hotfix"
     /socratiskill:socratic ship 25 "demo del viernes"
@@ -376,7 +635,7 @@
     were asking the same thing in two different ways.)
 
   ------------------------------------------------------------------
-  2.9b THE HANDOFF (levels 2-4)
+  3.9b THE HANDOFF (levels 2-4)
   ------------------------------------------------------------------
     At levels 2, 3 and 4 the work comes to you one piece at a time:
 
@@ -397,7 +656,7 @@
     only moment you find your own gap while it is still warm.
 
   ------------------------------------------------------------------
-  2.9c THE AUTONOMY NUMBER
+  3.9c THE AUTONOMY NUMBER
   ------------------------------------------------------------------
     /socratiskill:socratic status  -> includes today's report:
 
@@ -427,7 +686,7 @@
 
   ------------------------------------------------------------------
   ------------------------------------------------------------------
-  2.10 DRILLS (deliberate practice from your own repo)
+  3.10 DRILLS (deliberate practice from your own repo)
   ------------------------------------------------------------------
     /socratiskill:socratic drill analyze          -> quiz on your code
     /socratiskill:socratic drill analyze <file>   -> a specific file
@@ -485,11 +744,11 @@
 
 
 ================================================================================
-  3. TYPICAL WORKFLOWS
+  4. TYPICAL WORKFLOWS
 ================================================================================
 
   ------------------------------------------------------------------
-  3.1 DAILY CODING (level 3)
+  4.1 DAILY CODING (level 3)
   ------------------------------------------------------------------
     Start: /socratiskill:socratic level 3
     Claude sets up the files and signatures, hands you one unit at a
@@ -499,7 +758,7 @@
     -> see what you practiced and where you struggled.
 
   ------------------------------------------------------------------
-  3.2 LEARNING A NEW TOPIC (level 1 or 2)
+  4.2 LEARNING A NEW TOPIC (level 1 or 2)
   ------------------------------------------------------------------
     Start: /socratiskill:socratic level 2
     Ask the topic. Claude frames the module and hands you the part
@@ -512,7 +771,7 @@
       /socratiskill:socratic endteach
 
   ------------------------------------------------------------------
-  3.3 WEEKLY REFRESHER
+  4.3 WEEKLY REFRESHER
   ------------------------------------------------------------------
     Every few days:
       /socratiskill:socratic review
@@ -523,7 +782,7 @@
 
 
 ================================================================================
-  4. WHERE STATE LIVES
+  5. WHERE STATE LIVES
 ================================================================================
 
   ~/.claude/socratic/profile.json          your level, mode, enabled flag
@@ -534,7 +793,7 @@
 
 
 ================================================================================
-  5. TROUBLESHOOTING
+  6. TROUBLESHOOTING
 ================================================================================
 
   Problem: /socratiskill:socratic status shows "enabled: false".
@@ -681,16 +940,16 @@
     or set "global_level" to 1 in ~/.claude/socratic/profile.json
 
 ================================================================================
-  6. DISABLE / PAUSE / UNINSTALL
+  7. DISABLE / PAUSE / UNINSTALL
 ================================================================================
 
   Four levels of "stop the plugin", from softest to heaviest:
 
-  6.1 SOFT MUTE (state preserved, ~30 tokens/turn for silencer):
+  7.1 SOFT MUTE (state preserved, ~30 tokens/turn for silencer):
     /socratiskill:socratic off
     /socratiskill:socratic on        (to re-enable)
 
-  6.2 TRUE BYPASS (state preserved, zero token cost):
+  7.2 TRUE BYPASS (state preserved, zero token cost):
     /socratiskill:socratic pause
     /socratiskill:socratic resume    (to come back)
 
@@ -698,11 +957,11 @@
       bash ~/socratiskill/scripts/pause.sh
       bash ~/socratiskill/scripts/resume.sh
 
-  6.3 PLUGIN-LEVEL DISABLE (Claude Code feature):
+  7.3 PLUGIN-LEVEL DISABLE (Claude Code feature):
     /plugin disable socratiskill
     /plugin enable socratiskill      (to re-enable)
 
-  6.4 FULL UNINSTALL — two equivalent paths:
+  7.4 FULL UNINSTALL — two equivalent paths:
 
     Inside Claude Code (preferred — no path juggling):
       /socratiskill:socratic reset force    (wipes state; hardened guards)
@@ -729,7 +988,7 @@
 
 
 ================================================================================
-  7. DEEPER READING
+  8. DEEPER READING
 ================================================================================
 
   README.md            overview, architecture, robustness invariants,

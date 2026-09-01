@@ -1,5 +1,5 @@
 /**
- * escape.ts — `ship <reason> [minutes]`.
+ * escape.ts — `ship [minutes] <reason>`.
  *
  * The deduplication of v0.4's two escape valves. `unlock` (temporary,
  * reason required, logged) and `mode: productive` (persistent, silent)
@@ -70,6 +70,14 @@ function parseArgs(argv: string[]): Args {
     rest.push(a)
   }
   // Bare form: `ship 20 fixing prod` or `ship fixing prod`.
+  //
+  // THE MINUTES GO FIRST, and that ordering is deliberate: a LEADING
+  // bare number is unambiguous, while a trailing one is not — in
+  // `ship fix issue 3` the 3 belongs to the reason. The docs and this
+  // script's own error text used to advertise `ship "<why>" [minutes]`,
+  // a form that silently swallowed the number into the reason and left
+  // the duration at the default. If you change the ordering here, fix
+  // the error message, the SKILL.md signature and QUICKSTART 2.2 too.
   if (!out.reason && rest.length > 0) {
     if (/^\d+$/.test(rest[0]!)) {
       out.minutes = Number(rest[0])
@@ -134,7 +142,7 @@ function cmdOpen(args: Args): void {
     // The reason is the whole accountability mechanism. Without it the
     // escape is just a switch, and a switch with no record is how the
     // autonomy number quietly stops meaning anything.
-    process.stderr.write('error: a reason is required — ship "<why>" [minutes]\n')
+    process.stderr.write("error: a reason is required — ship [minutes] <why>\n")
     process.exit(2)
   }
 

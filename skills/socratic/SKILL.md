@@ -1,7 +1,7 @@
 ---
 name: socratic
 description: Adaptive socratic mentor entry point. Invoked as /socratiskill:socratic to view the current level on the pedagogical axis, change it, or inspect which rules are active. For automatic per-turn injection, the plugin's UserPromptSubmit hook handles it outside this skill.
-argument-hint: "[status | on | off | pause | resume | calibrate | level <1-5> | ship <reason> [minutes] | drill [analyze <file>|build|fix|done] | hint | faster | slower | challenge | accept | teach <topic> | endteach | review | journal [today|week|month] | reset [force]]"
+argument-hint: "[status | on | off | pause | resume | calibrate | level <1-5> | ship [minutes] <reason> | drill [analyze <file>|build|fix|done] | hint | faster | slower | challenge | accept | teach <topic> | endteach | review | journal [today|week|month] | reset [force]]"
 allowed-tools: [Read, Write, Bash]
 ---
 
@@ -81,12 +81,16 @@ first word:
   offering it and without commenting on the choice. For anything else,
   respond `invalid level: <N>` listing `1-5`, and write nothing.
 
-- `ship <reason> [minutes]` -> Open a logged escape: the agent writes
+- `ship [minutes] <reason>` -> Open a logged escape: the agent writes
   normally until it expires, then the level re-arms by itself. Defaults
   to 10 minutes; `ship 25 "demo del viernes"` sets it explicitly.
   A reason is REQUIRED — it is the whole accountability mechanism.
-  Run `bun run <plugin-root>/scripts/escape.ts "<reason>" [minutes]`
-  (or `--status` / `--end`) and show stdout verbatim.
+  Run `bun run <plugin-root>/scripts/escape.ts [minutes] <reason>`
+  (or `--status` / `--end`) and show stdout verbatim. The minutes go
+  FIRST: a trailing number is read as part of the reason, so
+  `escape.ts "fix prod" 25` silently means 10 minutes. Prefer the
+  explicit `--minutes N --reason "<why>"` form when you are the one
+  building the command.
   **Do not editorialize when the user ships.** No "are you sure", no
   reminder about their goals, no disappointment. Real work has real
   deadlines, and a lock with no exit gets the plugin uninstalled. The
@@ -200,7 +204,7 @@ first word:
 For anything else, respond:
 ```
 unknown subcommand: <args>
-valid: status | on | off | pause | resume | calibrate | level <1-5> | ship <reason> [minutes] | drill [analyze <file>|build|done] | hint | faster | slower | challenge | accept | teach <topic> | endteach | review | journal [today|week|month] | reset [force]
+valid: status | on | off | pause | resume | calibrate | level <1-5> | ship [minutes] <reason> | drill [analyze <file>|build|done] | hint | faster | slower | challenge | accept | teach <topic> | endteach | review | journal [today|week|month] | reset [force]
 ```
 
 ## The axis (see rules/)
@@ -357,7 +361,7 @@ When `$ARGUMENTS == "calibrate"`:
 5. If the script exits 0, respond:
    ```
    calibration complete: level N (<role>)
-   mode defaults to: learn
-   run /socratiskill:socratic mode productive if you prefer speed over depth.
+   the level is the only dial: higher means more of the work is yours.
+   run /socratiskill:socratic level <1-5> to change it at any time.
    ```
    On error, show stderr and stop without touching anything else.
