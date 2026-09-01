@@ -1660,6 +1660,63 @@ if should_run 35; then
   grep -q "manufactured exercise is worse than no" "$RULES" && pass "rules prefer no drill to a fake one" || fail "S35i fake-drill rule missing"
 fi
 
+## S36 shape recognizer speaks every listed language
+if should_run 36; then
+  header "S36 shape vocabulary (false positives by language)"
+
+  # WHY THIS EXISTS. Failing closed is safe but only USABLE if the
+  # recognizer speaks the language in front of it. Every shape assert
+  # before this one used TS, Python or C#, so nobody noticed that the
+  # regexes spoke four languages while code_extensions listed twenty.
+  # Nine of thirteen honest skeletons were denied, and because the
+  # allowance is 0 at levels 3-5, ONE false positive kills the whole
+  # file — eleven extensions were effectively unusable.
+  #
+  # S29 asks "can an implementation sneak through?". This asks the
+  # opposite and equally necessary question: "does an honest skeleton
+  # get through?". A checker that denies everything passes S29 and is
+  # still worthless.
+  OUT=$(bun run "$PLUGIN_DIR/tests/fixtures/shape-languages.ts" 2>&1)
+  if [[ $? -eq 0 ]]; then
+    pass "every listed language accepts an honest skeleton"
+  else
+    fail "S36a shape false positives: $(echo "$OUT" | grep -c 'FALSE POSITIVE') language(s)"
+  fi
+  echo "$OUT" | grep -q "false negatives (implementation allowed): 0" \
+    && pass "no implementation slipped through the widened recognizer" \
+    || fail "S36b widening opened a hole: an implementation was allowed"
+
+  # THE GUARDRAIL. The widening added loose patterns, and every loose
+  # pattern is a potential hole. This is the line-level contract that
+  # proves it did not become one: real logic in every supported
+  # language must still consume budget.
+  OUT=$(bun run "$PLUGIN_DIR/tests/fixtures/shape-why.ts" 2>&1)
+  if [[ $? -eq 0 ]]; then
+    pass "all 60 line contracts hold (skeleton vs logic, both directions)"
+  else
+    fail "S36c line contract broken: $(echo "$OUT" | grep -E 'FALSE POSITIVE|HOLE' | head -3)"
+  fi
+
+  # A language-gated rule must never judge another language. SQL's
+  # column rule is the loosest thing in the file; if it ever fires
+  # generically, `id BIGINT PRIMARY KEY` shaped lines stop counting
+  # everywhere.
+  LEAK=$(bun -e '
+    import { ShapeCheck } from "./scripts/shape-check"
+    const c = ShapeCheck.classify("id BIGINT PRIMARY KEY,", ShapeCheck.DEFAULT_CONFIG, "generic")[0].category
+    console.log(c)
+  ')
+  [[ "$LEAK" == "statement" ]] && pass "SQL column rule does not leak into generic" \
+    || fail "S36d language gating leaked: generic saw '$LEAK'"
+
+  # And the language must come from the PATH, never the content, or the
+  # agent could pick its own ruleset by writing a shebang.
+  L1=$(bun -e 'import { ShapeCheck } from "./scripts/shape-check"; console.log(ShapeCheck.languageOf("a/b/proc.sql"))')
+  L2=$(bun -e 'import { ShapeCheck } from "./scripts/shape-check"; console.log(ShapeCheck.languageOf("a/b/impl.ts"))')
+  [[ "$L1" == "sql" && "$L2" == "generic" ]] && pass "language is derived from the extension" \
+    || fail "S36e languageOf wrong: got '$L1' and '$L2'"
+fi
+
 # ==========================================================================
 summary
 [[ "$FAIL_COUNT" -eq 0 ]]

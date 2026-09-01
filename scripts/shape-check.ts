@@ -28,6 +28,36 @@
  * which is the thing the whole axis wants them doing. Here it only
  * blocks the AGENT, which retries with a thinner file and loses a turn.
  * Do not "harmonize" the two.
+ *
+ * ---------------------------------------------------------------------
+ * WHY THE RECOGNIZER GREW A VOCABULARY (post-v0.5.1)
+ *
+ * Failing closed is safe, but it is only USABLE if the recognizer
+ * actually speaks the language in front of it. Measuring that (see
+ * tests/fixtures/shape-languages.ts) showed the original regexes spoke
+ * four languages — TS/JS, Python, C# and Java — while code_extensions
+ * listed twenty. Nine of thirteen honest skeletons were denied. Because
+ * the allowance is 0 at levels 3-5, ONE false positive kills the whole
+ * file, so eleven of the twenty extensions were effectively unusable:
+ * the agent could not scaffold anything and every attempt burned a turn.
+ *
+ * The fix is vocabulary, NOT a softer polarity. Every pattern added
+ * below has to be a construct that provably carries no body. The
+ * guardrails in tests/fixtures/shape-why.ts (return, :=, INSERT, UPDATE,
+ * SELECT, assignment, call) must keep counting as statements; they are
+ * what proves the widening did not become a hole.
+ *
+ * TWO RULES KEEP THE WIDENING HONEST:
+ *
+ *   1. LANGUAGE-SPECIFIC RULES ARE GATED BY EXTENSION. A rule that has
+ *      to be loose to be useful (SQL column definitions, Go's
+ *      colon-less struct fields) applies ONLY to that language, so it
+ *      cannot loosen TypeScript. `generic` is the strict fallback, and
+ *      an unrecognized extension gets it.
+ *   2. EVERY LOOSE RULE IS GUARDED BY A STATEMENT-KEYWORD DENYLIST.
+ *      `Email string` and `return nil` have the same two-token shape;
+ *      what separates them is that one starts with a keyword that
+ *      introduces execution. The denylist is checked FIRST and wins.
  */
 
 export namespace ShapeCheck {
@@ -65,6 +95,33 @@ export namespace ShapeCheck {
   }
 
   export type FileClass = "code" | "markup"
+
+  /**
+   * Which language-specific rules may fire. `generic` is the strict
+   * fallback and is what an unrecognized extension gets, so adding a
+   * language here can only ever RELAX, never tighten — which is why a
+   * new entry needs a guardrail case in shape-why.ts alongside it.
+   */
+  export type Lang = "generic" | "sql" | "go" | "c" | "rust" | "kotlin" | "swift" | "php" | "ruby"
+
+  const LANG_BY_EXT: Array<[string, Lang]> = [
+    [".sql", "sql"],
+    [".go", "go"],
+    [".c", "c"], [".h", "c"], [".cpp", "c"], [".hpp", "c"],
+    [".rs", "rust"],
+    [".kt", "kotlin"],
+    [".swift", "swift"],
+    [".php", "php"],
+    [".rb", "ruby"],
+  ]
+
+  export function languageOf(path: string): Lang {
+    const lower = path.toLowerCase()
+    for (const [ext, lang] of LANG_BY_EXT) {
+      if (lower.endsWith(ext)) return lang
+    }
+    return "generic"
+  }
 
   /**
    * Markup is judged by the line cap alone. An HTML or JSON skeleton is
@@ -108,16 +165,40 @@ export namespace ShapeCheck {
     return -1
   }
 
+  /**
+   * THE GUARD. Anything that introduces execution. Checked before every
+   * loose rule below, because the loose rules recognize SHAPES and a
+   * statement can wear a declaration's shape: `Email string` and
+   * `return nil` are both "two bare tokens". The keyword is the only
+   * thing that tells them apart, so this list is what keeps the widened
+   * recognizer from becoming a hole. Add to it freely; it can only ever
+   * make the check stricter.
+   */
+  const STATEMENT_KEYWORD_RE =
+    /^(?:return|if|elif|else|for|foreach|while|switch|case|when|break|continue|goto|throw|raise|yield|await|defer|go|del|delete|new|print|println|echo|assert|with|try|catch|finally|do|repeat|guard|panic|exit|emit|puts|require|include|typeof|instanceof|this|self|super)\b/i
+
+  /**
+   * Modifiers that may precede a declaration keyword. Purely additive:
+   * each one only qualifies a declaration that has to be there anyway,
+   * so widening this cannot admit a body on its own.
+   */
+  const MOD =
+    "(?:export|default|public|private|protected|internal|static|abstract|sealed|virtual|override|final|partial|async|declare|pub(?:\\([\\w:]+\\))?|open|data|inline|operator|suspend|fileprivate|unsafe|extern|const|readonly|lateinit|companion|value|friend|mutable|reified|tailrec|infix)\\s+"
+
   const IMPORT_RE =
     /^(import|from|export\s+\*|export\s+\{|using|#include|#import|package|require|use|extern\s+crate)\b/
   const REQUIRE_ASSIGN_RE = /^(const|let|var)\s+[\w{},\s*]+=\s*require\s*\(/
 
-  const DECL_KEYWORD_RE =
-    /^(export\s+)?(default\s+)?(public\s+|private\s+|protected\s+|internal\s+|static\s+|abstract\s+|sealed\s+|virtual\s+|override\s+|final\s+|partial\s+|async\s+|declare\s+)*(function|class|interface|type|enum|struct|namespace|module|trait|impl|record|def|fn|func|sub|proc)\b/
+  /** CAUSE 1 + 2: unknown modifiers and unknown declaration keywords. */
+  const DECL_KEYWORD_RE = new RegExp(
+    "^(?:" + MOD + ")*" +
+      "(?:function|class|interface|type|enum|struct|namespace|module|trait|impl|record|def|fn|fun|func|sub|proc|protocol|typedef|extension|object|actor|union|delegate|event|contract|annotation|mod)\\b",
+  )
 
   /** A method signature: modifiers, a name, a parameter list. */
-  const METHOD_SIG_RE =
-    /^(export\s+)?(public|private|protected|internal|static|abstract|virtual|override|final|async|declare)\s+[\w<>\[\],\s.?]+\([^)]*\)\s*(:\s*[\w<>\[\],\s.|?]+)?\s*[{;]?\s*$/
+  const METHOD_SIG_RE = new RegExp(
+    "^(?:" + MOD + ")+[\\w<>\\[\\],\\s.?*]+\\([^)]*\\)\\s*(?::\\s*[\\w<>\\[\\],\\s.|?]+)?\\s*[{;]?\\s*$",
+  )
 
   /**
    * An interface member with no modifiers at all — `Task<T> Login(string
@@ -126,6 +207,28 @@ export namespace ShapeCheck {
    */
   const INTERFACE_MEMBER_RE =
     /^[\w<>\[\],\s.?]+\s+\w+\s*\([^)]*\)\s*;\s*$|^\w+\??\s*\([^)]*\)\s*:\s*[\w<>\[\],\s.|?]+\s*;\s*$/
+
+  /**
+   * CAUSE 5: a signature whose return type carries a pointer or a
+   * qualifier — `ringbuf_t *ringbuf_new(size_t n);`, `Task<T> Run(A a)`.
+   *
+   * The `\s+` between the type and the name is load-bearing: without it
+   * `foo(1);` matches by splitting "foo" into a type and a name. Dots are
+   * excluded from the type so `db.insert(order);` cannot match, and the
+   * STATEMENT_KEYWORD guard removes `return foo(x);` and `new Foo(x);`.
+   */
+  const TYPED_SIG_RE =
+    /^[A-Za-z_][\w\s<>,\[\]]*?\s+\**\w+\s*\([^()]*\)\s*(?:const\s*)?[;{]?\s*$/
+
+  /**
+   * CAUSE 4: `name: Type` with a visibility prefix the old regex did not
+   * know (`pub entries: HashMap<..>`).
+   *
+   * Requiring the absence of `(` and `=` is what keeps an object literal
+   * entry with a computed value (`foo: compute(),`) out of this bucket.
+   */
+  const FIELD_RE =
+    /^(?:public\s+|private\s+|protected\s+|internal\s+|readonly\s+|static\s+|final\s+|const\s+|val\s+|var\s+|let\s+|open\s+|lateinit\s+|override\s+|abstract\s+|pub(?:\([\w:]+\))?\s+)*\w+\??\s*:\s*[^=(]+[,;]?\s*$/
 
   /** `export function foo(a: T): R` with no body on the line. */
   const BARE_SIG_RE =
@@ -136,14 +239,66 @@ export namespace ShapeCheck {
     /^(export\s+)?(const|let|var)\s+\w+\s*(:[^=]+)?=\s*(async\s*)?\([^)]*\)\s*(:\s*[^=]+)?=>\s*\{?\s*$/
 
   /**
-   * `name: Type` / `name?: Type` with no call and no assignment — an
-   * interface field, a type member, or a parameter on its own line.
+   * CAUSE 3: a field declared `Name Type`, with no colon — Go and C
+   * struct members. Gated to those two languages, because in Ruby the
+   * very same shape is a method call (`puts total`).
    *
-   * Requiring the absence of `(` and `=` is what keeps an object literal
-   * entry with a computed value (`foo: compute(),`) out of this bucket.
+   * No `(`, `=`, `{` or `.` may appear, and the STATEMENT_KEYWORD guard
+   * runs first, which is what keeps `return nil` and `total := 0` out.
    */
-  const FIELD_RE =
-    /^(public\s+|private\s+|protected\s+|internal\s+|readonly\s+|static\s+|final\s+|const\s+|val\s+|var\s+)*\w+\??\s*:\s*[^=(]+[,;]?\s*$/
+  const BARE_FIELD_RE =
+    /^(?:var\s+|val\s+|let\s+|const\s+|readonly\s+|pub(?:\([\w:]+\))?\s+|public\s+|private\s+)?[A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*\s+\**[\w.\[\]<>*]+(?:\s*`[^`]*`)?\s*,?\s*$/
+
+  /**
+   * CAUSE 5 (Go form): an interface member — `ByID(ctx C, id int64)
+   * (*User, error)`.
+   *
+   * The return spec is REQUIRED, not optional. Without that requirement
+   * a bare call `doWork()` would match, which is a real statement in Go.
+   * The cost is that a no-return member like `Close()` still counts; that
+   * is the fail-closed side and it is the right side to err on.
+   */
+  const GO_IFACE_RE =
+    /^\w+\s*\([^()]*\)\s*(?:\([^()]*\)|[\w*\[\].]+)\s*$/
+
+  /** CAUSE 6: block terminators that are words rather than punctuation. */
+  const TERMINATOR_RE =
+    /^(?:end|begin|loop|else|do)\b[\s\w]*$|^end[;,]?$/i
+
+  /** CAUSE 6: language preamble that carries no logic. */
+  const PREAMBLE_RE = /^(?:<\?php|<\?=|\?>|#!.*|<\?xml\b.*|%>|<%@.*)$/
+
+  /** CAUSE 6 (Go form): a bare string inside an `import ( ... )` block. */
+  const GO_IMPORT_MEMBER_RE = /^(?:[\w.]+\s+)?"[^"]*"$/
+
+  /**
+   * CAUSE 8: SQL. DDL is structure by any reading, so CREATE/ALTER/DROP
+   * of a schema object is a declaration. DROP is included deliberately:
+   * a down-migration is legitimately all DROPs, and the gate's job is to
+   * stop the agent from doing the USER'S THINKING, not to police
+   * destructive SQL — that is a different concern with a different owner.
+   */
+  const SQL_DDL_RE =
+    /^(?:CREATE|ALTER|DROP)\s+(?:OR\s+REPLACE\s+)?(?:UNIQUE\s+)?(?:CLUSTERED\s+|NONCLUSTERED\s+)?(?:TABLE|INDEX|VIEW|TYPE|SCHEMA|PROCEDURE|PROC|FUNCTION|TRIGGER|SEQUENCE|DATABASE|CONSTRAINT)\b/i
+
+  /** Anything that reads or writes data. Guard for the SQL rules below. */
+  const SQL_STATEMENT_RE =
+    /^(?:SELECT|INSERT|UPDATE|DELETE|MERGE|EXEC|EXECUTE|CALL|PRINT|RAISERROR|THROW|FETCH|OPEN|CLOSE|WHILE|IF|RETURN|COMMIT|ROLLBACK|TRUNCATE|GRANT|REVOKE|USE|WITH|VALUES|FROM|WHERE|JOIN|ORDER|GROUP|HAVING|UNION|INTO)\b/i
+
+  /**
+   * A column definition or a procedure parameter: `id BIGINT PRIMARY
+   * KEY,`, `@CustomerId BIGINT,`. Guarded by SQL_STATEMENT_RE, which is
+   * what keeps `SELECT ... FROM ...` and `EXEC sp_foo` out.
+   */
+  const SQL_COLUMN_RE =
+    /^[@\[]?\w+\]?\s+[A-Za-z]\w*(?:\s*\([^)]*\))?[\w\s()',.-]*,?\s*$/
+
+  /** Session pragmas: boilerplate at the top of a proc, never logic. */
+  const SQL_PRAGMA_RE =
+    /^SET\s+(?:NOCOUNT|ANSI_NULLS|QUOTED_IDENTIFIER|XACT_ABORT|ANSI_PADDING|ANSI_WARNINGS|CONCAT_NULL_YIELDS_NULL|NUMERIC_ROUNDABORT|ARITHABORT|TRANSACTION\s+ISOLATION)\b/i
+
+  /** SQL batch/section separators. */
+  const SQL_SEPARATOR_RE = /^(?:GO|AS|BEGIN|END)\s*;?$/i
 
   const STRUCTURAL_RE = /^[{}()\[\];,<>]+$/
 
@@ -165,7 +320,11 @@ export namespace ShapeCheck {
    * commented-out implementation does not count as statements — it also
    * does not help the user, but it is honestly a comment.
    */
-  export function classify(content: string, cfg: Config = DEFAULT_CONFIG): LineResult[] {
+  export function classify(
+    content: string,
+    cfg: Config = DEFAULT_CONFIG,
+    lang: Lang = "generic",
+  ): LineResult[] {
     const out: LineResult[] = []
     let inBlockComment = false
 
@@ -186,6 +345,14 @@ export namespace ShapeCheck {
           (trimmed.startsWith("<!--") && !trimmed.includes("-->"))) {
         inBlockComment = true
         out.push({ category: "comment", line })
+        continue
+      }
+
+      // CAUSE 6: `<?php`, a shebang, an XML declaration. Checked before
+      // the comment tests because `#!` would otherwise read as a comment
+      // and before everything else because it carries no code at all.
+      if (PREAMBLE_RE.test(trimmed)) {
+        out.push({ category: "structural", line })
         continue
       }
 
@@ -214,13 +381,25 @@ export namespace ShapeCheck {
 
       if (isMarker(code, cfg)) { out.push({ category: "marker", line }); continue }
 
+      // CAUSE 6: `end`, `begin` and friends. Safe generically — alone on
+      // a line these carry no logic in any language that has them.
+      if (TERMINATOR_RE.test(code)) { out.push({ category: "structural", line }); continue }
+
+      // ---- language-gated rules -------------------------------------
+      // Each of these is loose enough to be useful only inside its own
+      // language, so it must never be allowed to judge another one.
+      const langResult = classifyForLang(code, lang)
+      if (langResult) { out.push({ category: langResult, line }); continue }
+
       // A declaration only counts as one if it does NOT carry a body.
       // `function f() { return 1 }` is an implementation wearing a
       // signature's clothes.
+      const startsWithKeyword = STATEMENT_KEYWORD_RE.test(code)
       const looksDeclarative =
         DECL_KEYWORD_RE.test(code) || METHOD_SIG_RE.test(code) ||
         BARE_SIG_RE.test(code) || ARROW_OPEN_RE.test(code) ||
-        FIELD_RE.test(code) || INTERFACE_MEMBER_RE.test(code)
+        FIELD_RE.test(code) || INTERFACE_MEMBER_RE.test(code) ||
+        (!startsWithKeyword && TYPED_SIG_RE.test(code))
 
       if (looksDeclarative && !hasInlineBody(code)) {
         out.push({ category: "declaration", line })
@@ -234,19 +413,87 @@ export namespace ShapeCheck {
   }
 
   /**
+   * Rules that are only safe inside one language. Returns null when no
+   * language-specific rule applies, so the caller falls through to the
+   * strict generic path.
+   */
+  function classifyForLang(code: string, lang: Lang): Category | null {
+    if (lang === "sql") {
+      if (SQL_SEPARATOR_RE.test(code)) return "structural"
+      if (SQL_PRAGMA_RE.test(code)) return "structural"
+      if (SQL_STATEMENT_RE.test(code)) return null // falls through -> statement
+      if (SQL_DDL_RE.test(code)) return "declaration"
+      if (SQL_COLUMN_RE.test(code)) return "declaration"
+      return null
+    }
+
+    if (lang === "go") {
+      if (GO_IMPORT_MEMBER_RE.test(code)) return "import"
+      if (STATEMENT_KEYWORD_RE.test(code)) return null
+      if (GO_IFACE_RE.test(code)) return "declaration"
+      if (!/[(){}=.]/.test(code) && BARE_FIELD_RE.test(code)) return "declaration"
+      return null
+    }
+
+    if (lang === "c") {
+      if (STATEMENT_KEYWORD_RE.test(code)) return null
+      if (!/[(){}=.]/.test(code) && BARE_FIELD_RE.test(code)) return "declaration"
+      return null
+    }
+
+    return null
+  }
+
+  /**
    * A body stand-in. Checked against the CODE part of the line only, so
    * a trailing `// TODO` on a real statement cannot launder it — that
    * line was already stripped to its code before we get here.
+   *
+   * CAUSE 7: the original version only fired after `throw`/`raise`, so
+   * Rust's `unimplemented!()`, Kotlin's `TODO()`, Swift's `fatalError`
+   * and Go's `panic("not implemented")` all counted as implementation.
+   * A call-shaped stand-in is admitted only when it either takes NO
+   * arguments or names one of the configured markers — otherwise
+   * `panic("db is down")` would launder a real statement.
    */
   function isMarker(code: string, cfg: Config): boolean {
     const bare = code.replace(/[;,]+$/, "").trim()
     if (bare === "pass" || bare === "..." || bare === "…") return true
-    if (/^(throw|raise)\b/i.test(bare)) {
-      const lower = bare.toLowerCase()
+
+    const namesMarker = (s: string): boolean => {
+      const lower = s.toLowerCase()
       for (const m of cfg.markers) {
         if (lower.includes(m.toLowerCase())) return true
       }
+      return false
     }
+
+    if (/^(throw|raise)\b/i.test(bare)) return namesMarker(bare)
+
+    // Go and Rust have no `throw`: the stand-in for an unwritten body is
+    // `return nil, errors.New("not implemented")`. That is the exact
+    // analogue of the `throw new Error("not implemented")` admitted just
+    // above, so refusing it would be an accident of syntax rather than a
+    // decision. Kept narrow on purpose — the line must BOTH name a
+    // configured marker AND construct an error, so `return
+    // computeTotal(items)` and `return nil, errors.New("db down")` are
+    // still statements.
+    if (/^return\b/i.test(bare) && !bare.includes("=") && namesMarker(bare)) {
+      if (/\b(?:errors\.New|fmt\.Errorf|Errorf|NewError|Err|anyhow!|bail!)\s*\(/.test(bare)) {
+        return true
+      }
+    }
+
+    // Macro-shaped stand-ins: unimplemented!(), todo!(), TODO("...").
+    if (/^(?:unimplemented|todo|unreachable|notImplemented)\s*!?\s*\(/i.test(bare)) return true
+
+    // Call-shaped stand-ins, admitted only when empty or marker-named.
+    const call = bare.match(/^(?:fatalError|panic|abort|notImplemented|NotImplemented)\s*\((.*)\)$/i)
+    if (call) {
+      const args = (call[1] ?? "").trim()
+      return args === "" || namesMarker(args)
+    }
+
     return false
   }
 
@@ -283,9 +530,13 @@ export namespace ShapeCheck {
     return segments
   }
 
-  export function countStatements(content: string, cfg: Config = DEFAULT_CONFIG): number {
+  export function countStatements(
+    content: string,
+    cfg: Config = DEFAULT_CONFIG,
+    lang: Lang = "generic",
+  ): number {
     let total = 0
-    for (const r of classify(content, cfg)) {
+    for (const r of classify(content, cfg, lang)) {
       if (r.category !== "statement") continue
       total += statementWeight(stripLineComment(r.line).trim())
     }
@@ -297,9 +548,10 @@ export namespace ShapeCheck {
     content: string,
     limit = 3,
     cfg: Config = DEFAULT_CONFIG,
+    lang: Lang = "generic",
   ): string[] {
     const out: string[] = []
-    for (const r of classify(content, cfg)) {
+    for (const r of classify(content, cfg, lang)) {
       if (r.category !== "statement") continue
       const t = r.line.trim()
       out.push(t.length > 60 ? t.slice(0, 57) + "..." : t)

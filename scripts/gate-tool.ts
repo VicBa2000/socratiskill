@@ -268,9 +268,13 @@ export namespace Gate {
     // cap alone.
     const allowance = contract.statementAllowance
     if (allowance !== null && ShapeCheck.classifyFile(target, shapeConfig) === "code") {
-      const statements = ShapeCheck.countStatements(content, shapeConfig)
+      // The language gates the loose rules (SQL DDL, Go's colon-less
+      // struct fields). Derived from the target's extension, never from
+      // the content, so it cannot be steered by what the agent writes.
+      const lang = ShapeCheck.languageOf(target)
+      const statements = ShapeCheck.countStatements(content, shapeConfig, lang)
       if (statements > allowance) {
-        const samples = ShapeCheck.statementSamples(content, 3, shapeConfig)
+        const samples = ShapeCheck.statementSamples(content, 3, shapeConfig, lang)
         const shown = samples.length > 0 ? ` Offending lines start with: ${samples.map((s) => `"${s}"`).join(", ")}.` : ""
         return {
           allow: false,

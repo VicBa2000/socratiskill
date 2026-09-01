@@ -27,7 +27,8 @@
       ".json", ".yaml", ".yml", ".xml", ".toml", ".ini", ".env",
       ".md", ".txt", ".csv", ".svg"
     ],
-    "_sql_rough_edge": "KNOWN ROUGH EDGE: .sql sits in code_extensions. A CREATE TABLE is structure, but a stored procedure IS the implementation, and this user works with SPs. Failing closed is the right default; tune with real use.",
+    "_vocabulary": "Failing closed is safe but only USABLE if the recognizer speaks the language in front of it. Measuring that (tests/fixtures/shape-languages.ts) showed the original regexes spoke FOUR languages -- TS/JS, Python, C#, Java -- while this list has twenty. Nine of thirteen honest skeletons were denied, and since the allowance is 0 at levels 3-5 a single false positive kills the whole file, so eleven extensions were effectively unusable. Fixed post-v0.5.1 by giving the recognizer vocabulary, NOT by softening the polarity. Two rules keep that honest: loose rules are GATED BY EXTENSION so SQL's column rule cannot judge TypeScript, and every loose rule is guarded by a statement-keyword denylist. Scenario S36 measures both directions and will not pass a checker that simply denies everything.",
+    "_sql_note": ".sql is handled by language-gated rules: DDL (CREATE/ALTER/DROP of a schema object), column definitions, procedure parameters and session pragmas are structure. SELECT/INSERT/UPDATE/DELETE/MERGE/EXEC stay statements, so the body of a stored procedure is still the user's to write -- which is the point, since this user works with SPs.",
     "_marker_comment": "The allowlist of lines that may legitimately stand in for a body. Kept short and explicit on purpose: every entry here is a hole in Layer 1, so it must be cheap to audit by reading it.",
     "markers": [
       "TODO",
