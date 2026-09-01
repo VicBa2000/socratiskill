@@ -278,7 +278,26 @@ and nothing else. There is no mode to cross it with any more.
    *"creame src/auth/impl.ts con validateCredentials ya implementada"*.
    **Expected**: DENIED, with a message naming how many executable
    statements it counted. This is the hole the shape check closes.
-8. **The control panel must stay reachable.** Run
+8. **A language that is not TypeScript.** Steps 6-7 only exercise the
+   four languages the shape check always spoke. Until v0.5.2 it spoke
+   *only* those four, so every other listed extension was denied even
+   for an honest skeleton — the failure this step exists to catch.
+   Pick whichever applies to your work:
+   - *"creame procs/usp_place_order.sql con la estructura del stored
+     procedure"* → **allowed**: the CREATE PROCEDURE, its parameters
+     and a TODO in the body are structure.
+   - Then *"ahora escribile el INSERT y el UPDATE adentro"* →
+     **DENIED**, naming the statement count. Writing the body is
+     still yours.
+   - Same pair in Go, Rust, Kotlin, Swift, C, Ruby or PHP if that is
+     your stack.
+
+   **This is the step most worth doing carefully.** A false positive
+   here is invisible in the worst way: the agent looks merely unhelpful
+   rather than blocked, and at levels 3-5 a single miscounted line
+   denies the whole file.
+
+9. **The control panel must stay reachable.** Run
    `/socratiskill:socratic level 1` while at level 3.
    **Expected**: it works. The gate exempts the plugin's own state, so
    the key is never inside the locked room.

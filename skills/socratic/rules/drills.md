@@ -19,8 +19,8 @@ convenient, and the point is that the user cannot steer it either.
 
 ## ANALYZE — can you still read your own project?
 
-Available with or without immersive mode. Reading was never the thing
-being restricted.
+Available at EVERY level, including 1 and the level-6 off ramp. Reading
+was never the half the axis restricts.
 
 The script gives you a file path. Your protocol:
 
@@ -55,8 +55,9 @@ ask a question they can now answer by echo.
 
 ## BUILD — can you still start from a blank page?
 
-Requires immersive mode. A build drill with the agent free to write is
-not a drill.
+Requires level 3 or higher (and not the level-6 off ramp). A build
+drill with the agent free to write is not a drill — below level 3 the
+agent authors the bodies, so the exercise would measure nothing.
 
 Your protocol:
 

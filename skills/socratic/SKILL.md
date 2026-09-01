@@ -1,7 +1,7 @@
 ---
 name: socratic
 description: Adaptive socratic mentor entry point. Invoked as /socratiskill:socratic to view the current level on the pedagogical axis, change it, or inspect which rules are active. For automatic per-turn injection, the plugin's UserPromptSubmit hook handles it outside this skill.
-argument-hint: "[status | on | off | pause | resume | calibrate | level <1-5> | ship [minutes] <reason> | drill [analyze <file>|build|fix|done] | hint | faster | slower | challenge | accept | teach <topic> | endteach | review | journal [today|week|month] | reset [force]]"
+argument-hint: "[status | on | off | pause | resume | calibrate | level <1-5> | ship [minutes] <reason> | drill [analyze <file>|build|fix <file>|status|done|cancel] | hint | faster | slower | challenge | accept | teach <topic> | endteach | review | journal [today|week|month] | reset [force]]"
 allowed-tools: [Read, Write, Bash]
 ---
 
@@ -204,7 +204,7 @@ first word:
 For anything else, respond:
 ```
 unknown subcommand: <args>
-valid: status | on | off | pause | resume | calibrate | level <1-5> | ship [minutes] <reason> | drill [analyze <file>|build|done] | hint | faster | slower | challenge | accept | teach <topic> | endteach | review | journal [today|week|month] | reset [force]
+valid: status | on | off | pause | resume | calibrate | level <1-5> | ship [minutes] <reason> | drill [analyze <file>|build|fix <file>|status|done|cancel] | hint | faster | slower | challenge | accept | teach <topic> | endteach | review | journal [today|week|month] | reset [force]
 ```
 
 ## The axis (see rules/)

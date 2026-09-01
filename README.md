@@ -166,7 +166,7 @@ Invoke as `/socratiskill:socratic <arg>`.
 | `pause` / `resume` | **True bypass.** Renames `profile.json` ↔ `profile.json.paused` so the hook short-circuits before producing any output. Emits a one-shot silencer on the very first turn after pause (tells the model to forget skill instructions loaded earlier in the session), then **zero token cost per turn** until resume. Use when you want the plugin truly invisible without uninstalling. |
 | `calibrate` | Self-assessment + level update. `calibrate force` to recalibrate. |
 | `level <1-5>` | Set the axis. This is the only pedagogical setting there is. |
-| `ship <reason> [minutes]` | Open a logged escape: Claude writes normally until it expires (default 10 min), then the level re-arms itself. A reason is required — it is the whole accountability mechanism. Never questioned or moralized about. |
+| `ship [minutes] <reason>` | Open a logged escape: Claude writes normally until it expires (default 10 min), then the level re-arms itself. A reason is required — it is the whole accountability mechanism. Never questioned or moralized about. The minutes go **first**: a trailing number is read as part of the reason, since in `ship fix issue 3` the 3 belongs to the reason. |
 | `drill analyze [<file>]` | Get quizzed on code that already exists in your repo. The script picks the file on rotation, not the model. Works at any level — reading was never the restricted half. |
 | `drill build` | Implement a bounded task from a blank page. Needs level 3+; below that Claude writes the bodies and the drill measures nothing. Reports lines you wrote on `drill done`. |
 | `drill fix [<file>]` | Make a surgical change to code that already exists. Needs level 3+. Two phases: Claude states one change request, then you must work out **where** it goes before touching anything — that is the exercise. Reports whether you located it first try. |
@@ -272,6 +272,14 @@ Three layers, in the order they fire:
    an executable statement. Unknown syntax and unlisted languages fail
    **closed** by construction. At levels 3-5 the allowance is zero:
    imports, types, signatures, comments and `TODO`s, nothing that runs.
+   Failing closed is only *usable* if the recogniser speaks the language
+   in front of it, so it carries explicit vocabulary for TypeScript/JS,
+   Python, C#, Java, SQL, Go, Rust, Kotlin, Swift, C/C++, Ruby and PHP.
+   The loose rules a language needs are gated by file extension — SQL's
+   column rule cannot judge TypeScript — and the extension comes from
+   the *path*, never the content, so the model cannot pick its own
+   ruleset by writing a shebang. New files are also capped at 80 lines
+   regardless of level.
 3. **Budget.** A daily cap on new files, so a fooled gate is bounded.
 
 The plugin's own state stays writable throughout, so `off`, `pause`,

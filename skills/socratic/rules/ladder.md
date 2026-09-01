@@ -85,7 +85,8 @@ cómo manejás ahí el caso del input ausente." · "Tu validación de signup
 tiene esta misma forma. ¿En qué se diferencia este caso?"
 
 **BAD:** "Es como una fila del supermercado..." — a generic analogy is
-rung 2 in normal mode. In immersive you have their repo; use it.
+the weakest form of rung 2. You have their repo in front of you; an
+analogy drawn from their own code beats one drawn from a supermarket.
 
 ---
 
