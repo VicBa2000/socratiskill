@@ -1717,6 +1717,78 @@ if should_run 36; then
     || fail "S36e languageOf wrong: got '$L1' and '$L2'"
 fi
 
+## S37 the documentation contract: help text vs the code it describes
+if should_run 37; then
+  header "S37 command surface (docs vs code)"
+
+  # WHY THIS EXISTS. Three bugs of the SAME SHAPE shipped in a row and
+  # no assert saw any of them, because every other test in this suite
+  # exercises BEHAVIOUR while these were defects in the HELP TEXT:
+  #
+  #   - the end-of-calibration message told the user to run `mode
+  #     productive`, deleted in the v0.5.0 unification, so it landed on
+  #     "unknown subcommand" in the first minute of every new user's
+  #     life;
+  #   - the "valid:" list printed on a typo omitted `drill fix` (the
+  #     whole point of v0.5.1) plus `status` and `cancel`, so the one
+  #     place a user sees the list showed an incomplete one;
+  #   - `ship <reason> [minutes]` appeared in four places while the
+  #     parser only reads the minutes when they come FIRST, so the form
+  #     the error message itself recommended silently swallowed the
+  #     number and left the duration at the default.
+  #
+  # The check closes to CODE, not just doc-to-doc: comparing the three
+  # lists against each other would have caught only the second, and it
+  # passes happily when all three are wrong together — which is exactly
+  # what happened with `mode`.
+  OUT=$(bun run "$PLUGIN_DIR/tests/fixtures/command-surface.ts" 2>&1)
+  if [[ $? -eq 0 ]]; then
+    pass "docs agree with each other and with the code"
+  else
+    fail "S37a command surface: $(echo "$OUT" | grep BROKEN | head -2)"
+  fi
+
+  # The three failure modes above, asserted one at a time so a break
+  # names which contract went. Each mutates a COPY of the tree, because
+  # an assert that edits the real files and restores them is one
+  # interrupted run away from leaving the repo dirty.
+  surface_breaks() {
+    # $1 = file to mutate, $2 = sed-style python replacement pair
+    local work="${TEST_ROOT}/surface"
+    rm -rf "$work"; mkdir -p "$work"
+    cp -r "$PLUGIN_DIR/skills" "$PLUGIN_DIR/scripts" "$PLUGIN_DIR/tests" "$work/" 2>/dev/null
+    cp "$PLUGIN_DIR/README.md" "$PLUGIN_DIR/QUICKSTART.txt" "$PLUGIN_DIR/MANUAL-TEST.md" "$work/" 2>/dev/null
+    python -c "
+import io,sys
+p=sys.argv[1]; a=sys.argv[2]; b=sys.argv[3]
+s=io.open(p,encoding='utf-8',newline='').read()
+io.open(p,'w',encoding='utf-8',newline='').write(s.replace(a,b,1))
+" "$work/$1" "$2" "$3"
+    local out
+    out=$(cd "$work" && bun run "tests/fixtures/command-surface.ts" 2>&1)
+    if [[ $? -ne 0 ]]; then echo "caught"; else echo "MISSED"; fi
+  }
+
+  R=$(surface_breaks "skills/socratic/rules/drills.md" "Requires level 3 or higher" "Requires immersive mode")
+  [[ "$R" == "caught" ]] && pass "catches retired vocabulary in a live rules file" \
+    || fail "S37b immersive reference went unnoticed"
+
+  R=$(surface_breaks "README.md" '`ship [minutes] <reason>`' '`ship <reason> [minutes]`')
+  [[ "$R" == "caught" ]] && pass "catches the retired ship signature" \
+    || fail "S37c wrong ship signature went unnoticed"
+
+  R=$(surface_breaks "skills/socratic/SKILL.md" "drill [analyze <file>|build|fix <file>|status|done|cancel]" "drill [analyze <file>|build|done]")
+  [[ "$R" == "caught" ]] && pass "catches a drill surface that drifts from drill.ts" \
+    || fail "S37d incomplete drill list went unnoticed"
+
+  # And it must not be a checker that simply fails on everything: the
+  # unmutated tree has to pass, which the first assert above already
+  # established. This one proves a harmless edit does NOT trip it.
+  R=$(surface_breaks "README.md" "Three layers, in the order they fire:" "Three layers, in the order they run:")
+  [[ "$R" == "MISSED" ]] && pass "an unrelated doc edit does not trip it" \
+    || fail "S37e the check fires on edits it should ignore"
+fi
+
 # ==========================================================================
 summary
 [[ "$FAIL_COUNT" -eq 0 ]]

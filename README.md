@@ -616,7 +616,7 @@ Two complementary suites — together cover the pedagogical flow AND the
 threat model.
 
 ```bash
-bash tests/run-all.sh         # 35 scenarios, 278 assertions (functional)
+bash tests/run-all.sh         # 36 scenarios, 283 assertions (functional)
 bash tests/run-security.sh    #  8 scenarios, 40 assertions (adversarial)
 # flags for both: --only <N>, --stop-on-fail, --list
 ```
@@ -638,8 +638,11 @@ bash write-detection with a false-positive battery), the `ship` escape and
 its expiry, the v0.4→v0.5 profile migration, the handoff protocol and
 unit continuity across turns, the git-based autonomy measurement across
 a mid-session commit and across two repositories, drill selection and
-rotation, and the control-plane exemption that keeps the gate from
-locking you out of its own off switch.
+rotation, the control-plane exemption that keeps the gate from locking
+you out of its own off switch, and the documentation contract — the
+help text is checked against the code it describes, so a subcommand
+list that drifts from the dispatcher, or a phrase describing a feature
+that was removed, fails the suite instead of reaching a user.
 
 **`run-security.sh`** runs adversarial tests against the audit guards:
 hostile `STATE_DIR` values to `uninstall.sh` (path traversal, root,
@@ -648,7 +651,7 @@ write under interruption, concurrent RMW on `profile.json`,
 antipattern regex bounds, hostile stdin to the hooks, and topic
 injection (null bytes, RTL unicode, shell metacharacters).
 
-Combined: **318 assertions, all green** as of v0.5.2.
+Combined: **323 assertions, all green** as of v0.5.2.
 
 For a manual end-to-end in a live Claude Code session, see
 [MANUAL-TEST.md](./MANUAL-TEST.md).
@@ -695,7 +698,7 @@ scripts/
 data/                  domains, prerequisites, technical terms, antipatterns,
                        roles, algorithm constants
 tests/
-  run-all.sh           35 scenarios, 278 assertions (functional)
+  run-all.sh           36 scenarios, 283 assertions (functional)
   run-security.sh      8 scenarios, 40 assertions (adversarial)
 sistemas.txt           full technical reference (rules, thresholds,
                        state files, hooks, every system)
