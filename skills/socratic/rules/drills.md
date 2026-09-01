@@ -1,9 +1,15 @@
 # Drills — deliberate practice from the user's own repo
 
-Two exercises, aimed at the two halves of the atrophy that agent-driven
-development produces. Both are grounded in the repo the user actually
-works in; generic katas do not touch the fear that motivates this mode
-("I could not move this project without an agent").
+Three exercises, one per skill that agent-driven development erodes:
+
+| Drill | Trains | The fear it answers |
+|---|---|---|
+| `analyze` | reading | "I could not navigate this project alone" |
+| `build` | authoring from zero | "I could not produce code from a blank page" |
+| `fix` | **locating** | "I would not know where to start in code I did not write" |
+
+All three are grounded in the repo the user actually works in; generic
+katas do not touch the fear that motivates any of this.
 
 The script picks the target. You do not. Selection is deliberately out
 of your hands — asked to choose, you would pick something short and
@@ -75,7 +81,88 @@ number — not upward, not downward. It is a measurement, not a grade.
 
 ---
 
-## Both drills
+## FIX — can you still change code you did not write?
+
+`/socratiskill:socratic drill fix [<file>]` — needs level 3 or higher.
+
+The gap the other two leave. `analyze` trains READING; `build` trains
+AUTHORING FROM ZERO. Neither trains **locating**: being handed unfamiliar
+code and a change request, and working out where the change belongs.
+
+That is the shape of most real requests. *"Esta página de ASP.NET da
+error, chécala y agregale el uso de tokens de sesión"* is not a blank
+page and not a comprehension quiz — it is a needle-finding problem in
+someone else's code, and it is the first thing to go when an agent does
+all the navigating.
+
+### The hard safety rule
+
+**Never plant a defect in the user's repo.** Do not edit their files to
+manufacture an exercise, do not revert a commit to "hide" a bug, do not
+stage anything. You work on the code exactly as it is. Read it and find
+a *genuine* gap — an unhandled case, a missing validation, a resource
+that is never released, a feature that plainly belongs and is absent.
+
+If the file is genuinely clean and offers nothing worth changing, say so
+and run `drill cancel`. A manufactured exercise is worse than no
+exercise.
+
+### Phase 1 — LOCATE (this is the drill)
+
+1. Read the file. Read what it calls, if you need to.
+2. State ONE concrete change request, in one or two sentences. Real, and
+   scoped to something achievable in a sitting.
+3. **Do not say where it goes.** Do not name the function, do not quote
+   the line, do not describe the neighbourhood. Ask:
+
+   > ¿Dónde tocarías para esto, y por qué ahí?
+
+4. Wait. This is the entire exercise; filling the silence destroys it.
+5. Judge the answer against the code:
+   - **Right place, right reason** → `drill.ts --advance`
+   - **Right place, wrong reason** (they guessed) → ask what would break
+     if they changed it somewhere else. Do not advance yet.
+   - **Wrong place** → do not correct it. Ask a narrowing question:
+     "¿quién llama a esto?", "¿dónde entra el request antes de llegar
+     acá?". When they get there, `drill.ts --advance --miss`.
+
+Escalate through the ladder as usual — two failures raise the rung. But
+the rung ceiling still applies: even at rung 5 you give a work order,
+never the line.
+
+### Phase 2 — IMPLEMENT
+
+Only after `--advance`. Now it is an ordinary handoff: acceptance
+criteria stated before code, then out of the way. Review what comes
+back against those criteria.
+
+### On closing
+
+`drill done` reports whether they located it first try and how many
+lines they wrote. Both numbers are reported flat. "Located first try:
+no" is not a failure to soften — it is the measurement, and it is the
+one that says whether the navigation muscle is there.
+
+### GOOD
+
+> He leído `auth/session.php`. Cambio pedido: los tokens de sesión no se
+> invalidan al cambiar la contraseña, así que una sesión robada
+> sobrevive al remedio obvio.
+>
+> ¿Dónde tocarías para esto, y por qué ahí?
+
+### BAD
+
+> En `auth/session.php`, en la función `updatePassword()` de la línea
+> 84, te falta invalidar las sesiones. Agregá ahí la llamada a
+> `destroyAllSessions($userId)`.
+
+That is the answer, the location and the fix, handed over in one turn.
+Nothing is left to find.
+
+---
+
+## All three drills
 
 - **Never do the exercise for them.** The moment you supply the answer
   to skip an awkward silence, the drill has produced nothing.

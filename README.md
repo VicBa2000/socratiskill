@@ -7,7 +7,7 @@
     ╚══════╝ ╚═════╝  ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝   ╚═╝╚══════╝╚═╝  ╚═╝╚═╝╚══════╝╚══════╝
     ──────────────────────────────────────────────────────────────────────────────────────
     ░▒▓█   A D A P T I V E   S O C R A T I C   M E N T O R   F O R   C L A U D E   █▓▒░
-                       >>  v0.5.0 · MIT · github.com/VicBa2000/socratiskill  <<
+                       >>  v0.5.1 · MIT · github.com/VicBa2000/socratiskill  <<
 ```
 
 # Socratiskill
@@ -169,6 +169,7 @@ Invoke as `/socratiskill:socratic <arg>`.
 | `ship <reason> [minutes]` | Open a logged escape: Claude writes normally until it expires (default 10 min), then the level re-arms itself. A reason is required — it is the whole accountability mechanism. Never questioned or moralized about. |
 | `drill analyze [<file>]` | Get quizzed on code that already exists in your repo. The script picks the file on rotation, not the model. Works at any level — reading was never the restricted half. |
 | `drill build` | Implement a bounded task from a blank page. Needs level 3+; below that Claude writes the bodies and the drill measures nothing. Reports lines you wrote on `drill done`. |
+| `drill fix [<file>]` | Make a surgical change to code that already exists. Needs level 3+. Two phases: Claude states one change request, then you must work out **where** it goes before touching anything — that is the exercise. Reports whether you located it first try. |
 | `drill status\|done\|cancel` | Inspect, close, or abandon the running drill |
 | `hint` / `faster` | Raise hint level by 1 (more direct) |
 | `slower` | Lower hint level by 2 (more socratic) |
@@ -371,6 +372,24 @@ scheduled. It works at any level; reading was never the restricted half.
 repo, and fixes acceptance criteria **before** any code exists — which
 is what makes the closing review objective rather than a matter of
 taste.
+
+`fix` targets the gap the other two leave. `analyze` trains reading and
+`build` trains authoring from zero; neither trains **locating** — being
+handed unfamiliar code and a change request and working out where the
+change belongs. That is the shape of most real requests (*"esta página
+da error, chécala y agregale tokens de sesión"*), and the first thing to
+go when an agent does all the navigating.
+
+It runs in two phases. Claude reads a file from the rotation, states one
+concrete change request, and then asks *where* it goes — without naming
+the function or quoting the line. Only once your answer holds up does it
+advance to implementation. `drill done` reports whether you located it
+first try, flat, because that is the number that says whether the
+navigation muscle is still there.
+
+It never plants a defect in your repo. It works on the code as it is and
+finds a genuine gap by reading; mutating your working tree to manufacture
+an exercise is not a trade this makes.
 
 ### Per-level protocols
 
@@ -619,7 +638,7 @@ write under interruption, concurrent RMW on `profile.json`,
 antipattern regex bounds, hostile stdin to the hooks, and topic
 injection (null bytes, RTL unicode, shell metacharacters).
 
-Combined: **290 assertions, all green** as of v0.5.0.
+Combined: **313 assertions, all green** as of v0.5.1.
 
 For a manual end-to-end in a live Claude Code session, see
 [MANUAL-TEST.md](./MANUAL-TEST.md).
@@ -666,7 +685,7 @@ scripts/
 data/                  domains, prerequisites, technical terms, antipatterns,
                        roles, algorithm constants
 tests/
-  run-all.sh           33 scenarios, 250 assertions (functional)
+  run-all.sh           34 scenarios, 273 assertions (functional)
   run-security.sh      8 scenarios, 40 assertions (adversarial)
 sistemas.txt           full technical reference (rules, thresholds,
                        state files, hooks, every system)

@@ -7,7 +7,7 @@ per-turn detectors, domain taxonomy, antipatterns, Feynman mode,
 spaced repetition, hooks, persistent state, plugin states, and the
 authorship gate.
 
-Updated after the axis unification (v0.5, September 2026).
+Updated after drill fix (v0.5.1, September 2026).
 
 
 TABLE OF CONTENTS
@@ -1242,6 +1242,91 @@ to fail.
 ================================================================
 APPENDIX — RECENT CHANGES
 ================================================================
+
+v0.5.1 — DRILL FIX (September 2026)
+
+New: the third drill. `analyze` trains READING and `build` trains
+AUTHORING FROM ZERO; neither trains LOCATING — being handed
+unfamiliar code plus a change request and working out where the
+change belongs. That is the shape of most real requests and the
+first skill to go when an agent does all the navigating.
+
+Two phases, and the first one IS the exercise:
+  LOCATE     the agent states one concrete change request and then
+             asks WHERE it goes, without naming the function or
+             quoting the line. A wrong answer gets a narrowing
+             question, never a correction.
+  IMPLEMENT  only after `drill.ts --advance`. An ordinary handoff
+             from there.
+
+The phase is real state, not prose, and the hook injects a different
+note per phase — a phase the model can silently skip is a phase that
+will be silently skipped.
+
+HARD SAFETY RULE: a fix drill NEVER plants a defect in the user's
+repo. No editing their files, no reverting a commit to hide a bug,
+no staging. It works on the code as it is and finds a genuine gap by
+reading. If the file offers nothing worth changing, it says so and
+cancels — a manufactured exercise is worse than none.
+
+`drill done` reports `located first try: yes|no` flat. That is the
+number that says whether the navigation muscle is still there, and
+it is not a failure to soften.
+
+Changed: drill.ts (kind "fix", phase, --advance/--miss),
+build-context.ts (per-phase note), rules/drills.md, SKILL.md.
+
+Tests: 273 functional + 40 security = 313 green.
+
+
+v0.5.0 — THE AXIS UNIFICATION (September 2026)
+
+The level stops measuring pedagogical overhead and starts measuring
+AUTHORSHIP. Levelling up now means the agent does LESS.
+
+Removed as user concepts: mode learn/productive, immersive, scaffold,
+unlock. All four were descendants of one missing capability — the old
+axis could not say "you write this one". 22 subcommands -> 19.
+
+New files:
+  data/levels.json              the axis contract (single source)
+  scripts/axis-state.ts         pure contract: levels, rungs, budget,
+                                escape, gate summary
+  scripts/shape-check.ts        "is this a skeleton?", fails closed
+  scripts/escape.ts             `ship` — the logged escape
+  scripts/status.ts             the single control panel
+  scripts/autonomy-report.ts    per-repo, per-day measurement
+  scripts/migrate-profile.ts    v0.4.x -> v0.5 migration
+  skills/socratic/rules/axis.md, ladder.md, handoff.md
+  skills/socratic/rules/level-{1..6}-*.md
+
+Deleted: data/roles.json, scripts/immersive{,-state,-report}.ts,
+rules/{mode-learn,mode-productive,immersive,immersive-ladder,
+hint-ladder}.md, rules/level-{1..5} (old names).
+
+Bugs found and fixed:
+  - hook-pre-tool.sh short-circuited on the "immersive" field, which
+    the axis removed: THE GATE NEVER ARMED. The old asserts passed
+    because they only checked "allow", and a disarmed gate also
+    allows. A gate assert without denials is a placebo.
+  - The shape check counted one statement per LINE, so an
+    implementation packed behind semicolons slipped under both the
+    statement allowance and the 80-line cap.
+  - Two false positives on real code: class fields with modifiers,
+    and C# interface members (which carry no modifiers).
+  - withLock received the file itself as lockPath: it could not
+    acquire, and once stale-lock detection let it through, the atomic
+    rename died with EPERM on Windows.
+  - The autonomy baseline was pinned to the cwd at activation time.
+    Now keyed per repository and rolled daily.
+
+Migration: explicit, idempotent, guarded by schema_version, with a
+one-time notice. Old level 5 meant the OPPOSITE of new level 5 and
+both read as "silent", so it migrates to level 6 — which preserves
+its exact behavior.
+
+Tests: 250 functional + 40 security = 290 green.
+
 
 "Per-level protocol" bundle (option C + mode sensitivity):
   - scripts/hint-state.ts: getInitialHintLevel L3: 0->2, L4: 0->1.

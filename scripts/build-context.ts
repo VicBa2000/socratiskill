@@ -64,9 +64,11 @@ interface FeynmanStateLite {
 }
 
 interface DrillStateLite {
-  kind: "analyze" | "build"
+  kind: "analyze" | "build" | "fix"
   file: string | null
   started_at: string
+  /** fix drills only: locate must be passed before implement. */
+  phase?: "locate" | "implement"
 }
 
 /**
@@ -146,6 +148,29 @@ function readErrorMap(): ErrorMapEntry[] {
   } catch {
     return []
   }
+}
+
+/**
+ * A fix drill has two phases and they demand opposite behavior, so the
+ * note has to say which one is running. A phase the model can silently
+ * skip is a phase that will be silently skipped — and the locate phase
+ * IS the drill.
+ */
+function drillFixNote(drill: DrillStateLite): string {
+  if ((drill.phase ?? "locate") === "locate") {
+    return (
+      `note: FIX DRILL active on ${drill.file}, phase LOCATE. You have stated the change request; the user must now work out WHERE it goes. ` +
+      "Do NOT name the function, quote the line, or describe the neighbourhood — that is the whole exercise. " +
+      "If they land in the wrong place, do not correct them: ask a narrowing question. " +
+      "When their answer holds up, run `drill.ts --advance` (add `--miss` if it took more than one attempt). " +
+      "NEVER edit their files to plant a defect. See skills/socratic/rules/drills.md."
+    )
+  }
+  return (
+    `note: FIX DRILL active on ${drill.file}, phase IMPLEMENT. They located it; the acceptance criteria are now the contract. ` +
+    "Stay out of the way: answer at the current rung, do not volunteer, do not offer to start it off. " +
+    "User closes it with /socratiskill:socratic drill done."
+  )
 }
 
 function dueCards(entries: ErrorMapEntry[]): ErrorMapEntry[] {
@@ -473,7 +498,9 @@ function main(): void {
     lines.push(
       drill.kind === "analyze"
         ? `note: ANALYZE DRILL active on ${drill.file}. Ask ONE question per turn and wait; do not explain the file first. Grade honestly in HINT_META (vague answers are correct:false) and keep the topic slug stable so wrong answers become Leitner cards. See skills/socratic/rules/drills.md. User closes it with /socratiskill:socratic drill done.`
-        : "note: BUILD DRILL active. The acceptance criteria agreed at the start are the contract. Stay out of the way: answer at the current rung, do not volunteer, do not offer to start it off. See skills/socratic/rules/drills.md. User closes it with /socratiskill:socratic drill done.",
+        : drill.kind === "fix"
+          ? drillFixNote(drill)
+          : "note: BUILD DRILL active. The acceptance criteria agreed at the start are the contract. Stay out of the way: answer at the current rung, do not volunteer, do not offer to start it off. See skills/socratic/rules/drills.md. User closes it with /socratiskill:socratic drill done.",
     )
   }
   if (activeAntipatterns.length > 0) {

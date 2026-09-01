@@ -9,9 +9,27 @@
  *             thing being restricted.
  *
  *   build   — the user implements a bounded task from a blank page.
- *             Targets "I could not produce code from scratch". Requires
- *             immersive mode, because a build drill with the agent free
- *             to write is not a drill.
+ *             Targets "I could not produce code from scratch". Needs
+ *             level 3+, because a build drill with the agent free to
+ *             write the bodies is not a drill.
+ *
+ *   fix     — the user makes a surgical change to code that already
+ *             exists and that they did not necessarily write. Targets
+ *             the gap the other two leave: analyze trains READING and
+ *             build trains AUTHORING FROM ZERO, but neither trains
+ *             LOCATING. "Esta pagina da error, chécala y agregale
+ *             tokens de sesion" is a different muscle from both, and
+ *             it is the one a working developer is actually asked for.
+ *
+ *             Two phases, and the first one is the exercise: say WHERE
+ *             the change goes and WHY before touching anything. The
+ *             agent may not advance the phase until that answer holds
+ *             up.
+ *
+ *             SAFETY: a fix drill NEVER plants a defect in the user's
+ *             repo. It works on real code as it is; the agent finds a
+ *             genuine gap by reading. Mutating someone's working tree
+ *             to manufacture an exercise is not a trade this makes.
  *
  * This script owns SELECTION and STATE; the model owns the pedagogy.
  * Selection is deterministic on purpose: asked to choose a file to be
@@ -20,6 +38,8 @@
  *
  * CLI: bun run drill.ts --kind analyze [--file <path>]
  *      bun run drill.ts --kind build
+ *      bun run drill.ts --kind fix [--file <path>]
+ *      bun run drill.ts --advance [--miss]   (fix: locate -> implement)
  *      bun run drill.ts --status
  *      bun run drill.ts --done | --cancel
  */
@@ -34,6 +54,8 @@ import { StateIO } from "./state-io"
 
 interface Args {
   kind?: string
+  advance?: boolean
+  miss?: boolean
   file?: string
   status?: boolean
   done?: boolean
@@ -41,10 +63,19 @@ interface Args {
 }
 
 interface DrillState {
-  kind: "analyze" | "build"
+  kind: "analyze" | "build" | "fix"
   file: string | null
   started_at: string
   git_baseline?: AutonomyReport.GitBaseline | null
+  /**
+   * fix drills only. The two-phase structure IS the exercise: you may
+   * not touch code until you have said where the change goes and why.
+   * Knowing where to start is the skill that goes first when an agent
+   * does all the navigating.
+   */
+  phase?: "locate" | "implement"
+  /** Whether the location was right on the first attempt. */
+  located_first_try?: boolean
 }
 
 interface DrillHistoryEntry {
@@ -87,6 +118,8 @@ function parseArgs(argv: string[]): Args {
     else if (a === "--status") out.status = true
     else if (a === "--done") out.done = true
     else if (a === "--cancel") out.cancel = true
+    else if (a === "--advance") out.advance = true
+    else if (a === "--miss") out.miss = true
   }
   return out
 }
@@ -332,6 +365,113 @@ function cmdBuild(): void {
   )
 }
 
+/**
+ * A surgical change to code that already exists.
+ *
+ * Needs level 3+ for the same reason `build` does: below that the agent
+ * writes the bodies and the exercise measures nothing. The file comes
+ * from the same deterministic rotation — being handed code you did not
+ * choose is half of what makes this realistic.
+ */
+function cmdFix(args: Args): void {
+  requireNoActiveDrill()
+
+  const profile = readProfile()
+  const level = Axis.readLevel(profile["global_level"])
+  if (level < 3 || Axis.isOffRamp(level)) {
+    process.stderr.write(
+      "error: a fix drill needs level 3 or higher — below that the agent makes the change for you.\n" +
+        "raise it first: /socratiskill:socratic level 3\n",
+    )
+    process.exit(2)
+  }
+
+  const root = AutonomyReport.repoRoot(process.cwd()) ?? process.cwd()
+
+  let file: string
+  let lines: number
+  if (args.file) {
+    file = args.file.split(sep).join("/")
+    if (!existsSync(join(root, file))) {
+      process.stderr.write(`error: file not found: ${file}\n`)
+      process.exit(2)
+    }
+    lines = countLines(join(root, file))
+  } else {
+    const picked = selectFile(root)
+    if (!picked) {
+      process.stderr.write(
+        "error: found no drillable source file here.\n" +
+          `looked for tracked source files between ${MIN_LINES} and ${MAX_LINES} lines.\n` +
+          "pass one explicitly: /socratiskill:socratic drill fix <path>\n",
+      )
+      process.exit(2)
+    }
+    file = picked.file
+    lines = picked.lines
+  }
+
+  const drill: DrillState = {
+    kind: "fix",
+    file,
+    started_at: new Date().toISOString(),
+    phase: "locate",
+    git_baseline: AutonomyReport.captureBaseline(process.cwd(), Axis.dayKey(new Date())),
+  }
+  writeDrill(drill)
+  pushHistory({ file, kind: "fix", at: drill.started_at })
+
+  process.stdout.write(
+    [
+      "drill started: fix",
+      `file: ${file}`,
+      `lines: ${lines}`,
+      `root: ${root}`,
+      "phase: locate",
+      drill.git_baseline ? "measuring: yes (git)" : "measuring: no (not a git repo)",
+      "protocol: read the file, state ONE concrete change request, and make",
+      "the user locate the change point BEFORE any code. See rules/drills.md.",
+    ].join("\n") + "\n",
+  )
+}
+
+/**
+ * Close the locate phase. Called by the agent once the user's answer
+ * about WHERE the change goes actually holds up — `--miss` records that
+ * it took more than one attempt.
+ *
+ * This is a real state transition rather than a line of prose because
+ * the locate phase is the whole point of the drill, and a phase the
+ * model can silently skip is a phase that will be silently skipped.
+ */
+function cmdAdvance(args: Args): void {
+  const drill = readDrill()
+  if (!drill) {
+    process.stderr.write("error: no drill is running.\n")
+    process.exit(2)
+  }
+  if (drill.kind !== "fix") {
+    process.stderr.write(`error: --advance only applies to a fix drill (running: ${drill.kind}).\n`)
+    process.exit(2)
+  }
+  if (drill.phase === "implement") {
+    process.stdout.write("drill: already in the implement phase\n")
+    return
+  }
+
+  drill.phase = "implement"
+  drill.located_first_try = args.miss !== true
+  writeDrill(drill)
+
+  process.stdout.write(
+    [
+      "drill fix: locate -> implement",
+      `located first try: ${drill.located_first_try ? "yes" : "no"}`,
+      "protocol: acceptance criteria are now fixed. Stay out of the way.",
+    ].join("\n") + "\n",
+  )
+}
+
 function cmdStatus(): void {
   const drill = readDrill()
   if (!drill) {
@@ -343,6 +483,7 @@ function cmdStatus(): void {
     [
       `drill: ${drill.kind}`,
       drill.file ? `file: ${drill.file}` : "file: (n/a)",
+      ...(drill.kind === "fix" ? [`phase: ${drill.phase ?? "locate"}`] : []),
       `elapsed: ${mins} min`,
     ].join("\n") + "\n",
   )
@@ -359,7 +500,15 @@ function cmdDone(): void {
   const mins = Math.max(0, Math.round((now.getTime() - Date.parse(drill.started_at)) / 60000))
   const out: string[] = [`drill finished: ${drill.kind}`, `duration: ${mins} min`]
 
-  if (drill.kind === "build" && drill.git_baseline) {
+  if (drill.kind === "fix") {
+    out.push(
+      drill.phase === "locate"
+        ? "phase: locate (never reached implement)"
+        : `located first try: ${drill.located_first_try ? "yes" : "no"}`,
+    )
+  }
+
+  if ((drill.kind === "build" || drill.kind === "fix") && drill.git_baseline) {
     const lines = AutonomyReport.linesSinceBaseline(drill.git_baseline)
     out.push(
       lines
@@ -389,9 +538,13 @@ function main(): void {
   if (args.status) return cmdStatus()
   if (args.done) return cmdDone()
   if (args.cancel) return cmdCancel()
+  if (args.advance) return cmdAdvance(args)
   if (args.kind === "analyze") return cmdAnalyze(args)
   if (args.kind === "build") return cmdBuild()
-  process.stderr.write("error: expected --kind analyze [--file <path>] | --kind build | --status | --done | --cancel\n")
+  if (args.kind === "fix") return cmdFix(args)
+  process.stderr.write(
+    "error: expected --kind analyze [--file <path>] | --kind build | --kind fix [--file <path>] | --advance [--miss] | --status | --done | --cancel\n",
+  )
   process.exit(2)
 }
 

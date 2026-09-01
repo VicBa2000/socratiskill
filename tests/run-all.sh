@@ -9,7 +9,7 @@
 #
 # Usage:
 #   bash tests/run-all.sh                 # run everything
-#   bash tests/run-all.sh --only <N>      # run only scenario N (1..34; 24 retired into 19/25/32)
+#   bash tests/run-all.sh --only <N>      # run only scenario N (1..35; 24 retired into 19/25/32)
 #   bash tests/run-all.sh --list          # list scenarios
 #   bash tests/run-all.sh --stop-on-fail  # abort on first FAIL
 #
@@ -1562,6 +1562,102 @@ if should_run 33; then
   mv "$tmp/profile.json" "$tmp/profile.json.paused"
   SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/status.ts" 2>&1 | grep -q "PAUSED" && pass "paused is reported plainly" || fail "S33c paused not reported"
   teardown_state "$tmp"
+fi
+
+## S35 drill fix: the locate phase
+if should_run 35; then
+  header "S35 drill fix (locate -> implement)"
+
+  # The gap analyze and build leave. analyze trains READING, build trains
+  # AUTHORING FROM ZERO; neither trains LOCATING — being handed
+  # unfamiliar code and a change request and working out where the change
+  # belongs. The two-phase structure IS the exercise.
+
+  repo="${TEST_ROOT}/repo-35"
+  mkdir -p "$repo/src"
+  ( cd "$repo" && git init -q . && git config user.email t@t && git config user.name t ) >/dev/null 2>&1
+  node -e '
+    const fs=require("fs");
+    fs.writeFileSync(process.argv[1], Array.from({length:60},(_,i)=>"const v"+i+" = "+i).join("\n")+"\n");
+  ' "$repo/src/session.ts"
+  ( cd "$repo" && git add . && git commit -qm base ) >/dev/null 2>&1
+
+  drill() { ( cd "$repo" && SOCRATIC_STATE_DIR="$1" bun run "$SCRIPTS/drill.ts" "${@:2}" 2>&1 ); }
+
+  # 35a — needs level 3+, for the same reason build does: below that the
+  # agent makes the change and the exercise measures nothing. The off
+  # ramp is not "even higher", it is the axis switched off.
+  # NOTE: capture into a variable before grepping. The harness runs with
+  # `pipefail`, so `cmd | grep -q X` inherits cmd's non-zero exit even
+  # when the grep matched — and every assert here expects a refusal.
+  tmp=$(setup_state 35a); set_level "$tmp" 2
+  OUT=$(drill "$tmp" --kind fix)
+  echo "$OUT" | grep -q "needs level 3 or higher" && pass "fix drill refused below level 3" || fail "S35a fix allowed at L2"
+  set_level "$tmp" 6
+  OUT=$(drill "$tmp" --kind fix)
+  echo "$OUT" | grep -q "needs level 3 or higher" && pass "fix drill refused on the off ramp" || fail "S35a fix allowed at L6"
+
+  # 35b — starts in the locate phase and measures.
+  set_level "$tmp" 3
+  OUT=$(drill "$tmp" --kind fix)
+  echo "$OUT" | grep -q "^phase: locate$" && pass "starts in the locate phase" || fail "S35b wrong initial phase"
+  echo "$OUT" | grep -q "measuring: yes (git)" && pass "captures a git baseline" || fail "S35b no baseline"
+  echo "$OUT" | grep -q "src/session.ts" && pass "the script picked the file" || fail "S35b no file picked"
+  drill "$tmp" --status | grep -q "^phase: locate$" && pass "status shows the phase" || fail "S35b status hides the phase"
+
+  # 35c — the per-turn note must differ by phase, and the locate note
+  # must forbid giving the location away. A phase the model can silently
+  # skip is a phase that will be silently skipped.
+  OUT=$(fire_pre "$tmp" "no se por donde empezar")
+  echo "$OUT" | grep -q "phase LOCATE" && pass "hook announces the locate phase" || fail "S35c locate note missing"
+  echo "$OUT" | grep -q "Do NOT name the function" && pass "locate note forbids naming the spot" || fail "S35c giveaway not forbidden"
+  echo "$OUT" | grep -q "NEVER edit their files to plant a defect" && pass "hook carries the no-planting rule" || fail "S35c planting not forbidden"
+
+  # 35d — advance is the real state transition.
+  drill "$tmp" --advance | grep -q "locate -> implement" && pass "advance moves the phase" || fail "S35d advance failed"
+  drill "$tmp" --status | grep -q "^phase: implement$" && pass "the phase persisted" || fail "S35d phase not persisted"
+  drill "$tmp" --advance | grep -q "already in the implement phase" && pass "advance is idempotent" || fail "S35d advance not idempotent"
+
+  OUT=$(fire_pre "$tmp" "ya lo ubique")
+  echo "$OUT" | grep -q "phase IMPLEMENT" && pass "hook switches to the implement note" || fail "S35d implement note missing"
+  echo "$OUT" | grep -q "Do NOT name the function" && fail "S35d locate note leaked into implement" || pass "locate note does not leak"
+
+  # 35e — the close reports both signals, and "located first try: no" is
+  # reported flat. It is the measurement, not a failure to soften.
+  ( cd "$repo" && printf 'a\nb\nc\n' >> src/session.ts )
+  OUT=$(drill "$tmp" --done)
+  echo "$OUT" | grep -q "located first try: yes" && pass "reports locating first try" || fail "S35e locate signal missing"
+  echo "$OUT" | grep -q "you wrote: +3 / -0 lines" && pass "reports lines written" || fail "S35e wrong line count: $(echo "$OUT" | grep 'you wrote')"
+  teardown_state "$tmp"
+
+  # 35f — a miss is recorded as a miss.
+  tmp=$(setup_state 35f); set_level "$tmp" 3
+  drill "$tmp" --kind fix --file src/session.ts >/dev/null
+  drill "$tmp" --advance --miss | grep -q "located first try: no" && pass "--miss records the miss" || fail "S35f miss not recorded"
+  drill "$tmp" --done | grep -q "located first try: no" && pass "the miss survives to the report" || fail "S35f miss lost"
+  teardown_state "$tmp"
+
+  # 35g — abandoning during locate is reported honestly rather than as a
+  # completed drill.
+  tmp=$(setup_state 35g); set_level "$tmp" 3
+  drill "$tmp" --kind fix --file src/session.ts >/dev/null
+  drill "$tmp" --done | grep -q "never reached implement" && pass "closing during locate says so" || fail "S35g abandoned locate reported as done"
+  teardown_state "$tmp"
+
+  # 35h — --advance only applies to a fix drill.
+  tmp=$(setup_state 35h); set_level "$tmp" 3
+  drill "$tmp" --kind analyze --file src/session.ts >/dev/null
+  OUT=$(drill "$tmp" --advance)
+  echo "$OUT" | grep -q "only applies to a fix drill" && pass "advance rejected on other kinds" || fail "S35h advance accepted on analyze"
+  teardown_state "$tmp"
+
+  # 35i — the rules must carry the load-bearing sentences, especially the
+  # safety one: manufacturing an exercise by mutating someone's repo is
+  # not a trade this makes.
+  RULES="$PLUGIN_DIR/skills/socratic/rules/drills.md"
+  grep -q "Never plant a defect" "$RULES" && pass "rules forbid planting a defect" || fail "S35i no-planting rule missing"
+  grep -q -i "do not say where it goes" "$RULES" && pass "rules forbid giving the location" || fail "S35i giveaway rule missing"
+  grep -q "manufactured exercise is worse than no" "$RULES" && pass "rules prefer no drill to a fake one" || fail "S35i fake-drill rule missing"
 fi
 
 # ==========================================================================

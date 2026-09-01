@@ -1,6 +1,6 @@
 {
   "name": "socratiskill",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Adaptive socratic mentor for Claude Code. One dial: the level decides how much of the work is yours. At 3 it writes skeletons and every function body is yours; at 5 it writes nothing and just asks. A PreToolUse gate enforces it, so levelling up means it does less for you, not more.",
   "author": {
     "name": "Victor Barrantes"

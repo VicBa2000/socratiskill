@@ -432,7 +432,14 @@
     /socratiskill:socratic drill analyze          -> quiz on your code
     /socratiskill:socratic drill analyze <file>   -> a specific file
     /socratiskill:socratic drill build            -> build from zero
+    /socratiskill:socratic drill fix              -> change existing code
     /socratiskill:socratic drill status|done|cancel
+
+    Tres ejercicios, uno por habilidad que se oxida:
+
+      analyze  leer          "no podria navegar este proyecto solo"
+      build    escribir      "no podria arrancar de una pagina en blanco"
+      fix      UBICAR        "no sabria por donde empezar en codigo ajeno"
 
     ANALYZE answers "could I still find my way around this project
     without an agent?". It picks a source file from your repo — the
@@ -449,6 +456,30 @@
     and agrees the acceptance criteria with you BEFORE any code
     exists, then stays out of the way. `drill done` reports how many
     lines you wrote and reviews against those criteria.
+
+    FIX answers "podria cambiar codigo que no escribi yo?". Es el hueco
+    que los otros dos dejan: analyze entrena LEER, build entrena
+    ESCRIBIR DESDE CERO, y ninguno entrena UBICAR. Necesita nivel 3+.
+
+    Va en dos fases, y la primera ES el ejercicio:
+
+      1. LOCATE   Claude lee un archivo de la rotacion y plantea UN
+                  pedido de cambio concreto. Despues pregunta donde
+                  tocarias y por que — sin nombrar la funcion ni citar
+                  la linea. Si te equivocas de lugar no te corrige:
+                  te hace una pregunta mas angosta.
+      2. IMPLEMENT  Recien cuando tu respuesta se sostiene. A partir
+                  de ahi es un handoff normal.
+
+    `drill done` reporta si lo ubicaste al primer intento y cuantas
+    lineas escribiste. "Located first try: no" no es un reproche, es
+    LA medicion: es el numero que dice si el musculo de navegar sigue
+    ahi.
+
+    NUNCA planta un bug en tu repo. Trabaja sobre el codigo tal cual
+    esta y encuentra un hueco real leyendo. Si el archivo no ofrece
+    nada que valga la pena, lo dice y cancela — un ejercicio fabricado
+    es peor que ningun ejercicio.
 
     Only one drill runs at a time. `drill cancel` drops it.
 

@@ -1,7 +1,7 @@
 ---
 name: socratic
 description: Adaptive socratic mentor entry point. Invoked as /socratiskill:socratic to view the current level on the pedagogical axis, change it, or inspect which rules are active. For automatic per-turn injection, the plugin's UserPromptSubmit hook handles it outside this skill.
-argument-hint: "[status | on | off | pause | resume | calibrate | level <1-5> | ship <reason> [minutes] | drill [analyze <file>|build|done] | hint | faster | slower | challenge | accept | teach <topic> | endteach | review | journal [today|week|month] | reset [force]]"
+argument-hint: "[status | on | off | pause | resume | calibrate | level <1-5> | ship <reason> [minutes] | drill [analyze <file>|build|fix|done] | hint | faster | slower | challenge | accept | teach <topic> | endteach | review | journal [today|week|month] | reset [force]]"
 allowed-tools: [Read, Write, Bash]
 ---
 
@@ -94,7 +94,7 @@ first word:
   Exit 2 = no reason given, or nothing to escape from (level 1 and
   level 6 already let the agent write); exit 3 = no profile.
 
-- `drill [analyze [<file>] | build | status | done | cancel]` ->
+- `drill [analyze [<file>] | build | fix [<file>] | status | done | cancel]` ->
   Deliberate practice drawn from the user's own repo.
   - `drill analyze [<file>]` — the user is quizzed on existing code.
     Works at any level: reading was never the restricted half. With no
@@ -104,10 +104,19 @@ first word:
     Requires level 3 or higher; below that the agent writes the bodies
     and the drill measures nothing. The script exits 2 with
     instructions.
+  - `drill fix [<file>]` — the user makes a surgical change to code
+    that already exists. Requires level 3+. TWO PHASES: state one
+    concrete change request, then make them work out WHERE it goes
+    before any code. Do NOT name the function or quote the line — that
+    is the exercise. When their answer holds up, run
+    `drill.ts --advance` (add `--miss` if it took more than one try).
+    **NEVER edit their files to plant a defect**: work on the code as
+    it is and find a genuine gap by reading.
   - `drill status` / `drill done` / `drill cancel` — inspect, close (a
-    build drill reports lines written), or abandon.
+    build or fix drill reports lines written), or abandon.
   Run `bun run <plugin-root>/scripts/drill.ts` with `--kind analyze
-  [--file <path>]`, `--kind build`, `--status`, `--done`, or `--cancel`.
+  [--file <path>]`, `--kind build`, `--kind fix [--file <path>]`,
+  `--advance [--miss]`, `--status`, `--done`, or `--cancel`.
   Show stdout verbatim, then follow the protocol in `rules/drills.md`.
   Exit 2 = another drill is running, file not found, nothing drillable
   found, or the level is too low; show stderr verbatim.
@@ -274,9 +283,11 @@ Shared rules: `rules/axis.md` (the role), `rules/ladder.md` (the rungs),
     in either direction.
 15. For `drill`: parse the SECOND word. `analyze` -> `--kind analyze`,
     plus `--file "<third word>"` if a path was given. `build` ->
-    `--kind build`. `status`/`done`/`cancel` -> the matching flag. No
-    second word -> `--status`. Anything else: respond
+    `--kind build`. `fix` -> `--kind fix`, plus `--file "<third word>"`
+    if a path was given. `status`/`done`/`cancel` -> the matching flag.
+    No second word -> `--status`. Anything else: respond
     `unknown: drill <word>` and invoke nothing.
+    `--advance` is yours to call mid-drill, not a user subcommand.
     After a successful start, read the target file with Read before your
     first question — you cannot grade an answer about code you have not
     read.

@@ -317,6 +317,23 @@ and nothing else. There is no mode to cross it with any more.
 5. `drill done` → reports the lines you wrote and reviews against those
    criteria.
 
+### Fix drill — the locate phase
+
+6. `/socratiskill:socratic drill fix`. **Expected**: starts in phase
+   `locate`, on a file the script chose.
+7. **Expected, and this is the actual test**: Claude states ONE change
+   request and then asks where it goes. It must NOT name the function,
+   quote the line, or describe the neighbourhood. If it hands you the
+   location, the scenario FAILS — that was the entire exercise.
+8. Answer with the WRONG place on purpose. **Expected**: it does not
+   correct you. It asks a narrowing question ("¿quién llama a esto?").
+9. Get it right. **Expected**: it advances to `implement` and only then
+   fixes acceptance criteria.
+10. `drill done` → reports `located first try: no`, flat, with no
+    consolation padding. That is the measurement.
+11. Check `git status`. **Expected**: Claude changed NOTHING in your
+    repo to set the exercise up. A planted defect is a hard failure.
+
 ---
 
 ## Scenario 12 — The handoff loop
