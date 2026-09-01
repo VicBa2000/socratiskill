@@ -19,6 +19,7 @@ import { homedir } from "node:os"
 import { join, dirname } from "node:path"
 import { HintState } from "./hint-state"
 import { StateIO } from "./state-io"
+import { Axis } from "./axis-state"
 
 interface Args {
   delta?: number
@@ -70,7 +71,7 @@ function writeJson(path: string, data: unknown): void {
 function loadProfileLevel(): number {
   const p = join(stateDir(), "profile.json")
   const data = readJson<Record<string, unknown>>(p, {})
-  return Math.min(5, Math.max(1, Number(data["global_level"]) || 3))
+  return Axis.readLevel(data["global_level"])
 }
 
 function main(): void {

@@ -28,8 +28,8 @@ import { readFileSync, existsSync, readdirSync, statSync } from "node:fs"
 import { execFileSync } from "node:child_process"
 import { homedir } from "node:os"
 import { join, relative, extname, sep } from "node:path"
-import { Immersive } from "./immersive-state"
-import { ImmersiveReport } from "./immersive-report"
+import { Axis } from "./axis-state"
+import { AutonomyReport } from "./autonomy-report"
 import { StateIO } from "./state-io"
 
 interface Args {
@@ -44,7 +44,7 @@ interface DrillState {
   kind: "analyze" | "build"
   file: string | null
   started_at: string
-  git_baseline?: ImmersiveReport.GitBaseline | null
+  git_baseline?: AutonomyReport.GitBaseline | null
 }
 
 interface DrillHistoryEntry {
@@ -255,7 +255,7 @@ function requireNoActiveDrill(): void {
 
 function cmdAnalyze(args: Args): void {
   requireNoActiveDrill()
-  const root = ImmersiveReport.repoRoot(process.cwd()) ?? process.cwd()
+  const root = AutonomyReport.repoRoot(process.cwd()) ?? process.cwd()
 
   let file: string
   let lines: number
@@ -299,22 +299,26 @@ function cmdAnalyze(args: Args): void {
 function cmdBuild(): void {
   requireNoActiveDrill()
 
+  // A build drill is "can you still start from a blank page". It needs a
+  // level where the agent does not author the bodies — otherwise it can
+  // simply write the thing and the drill measures nothing. L3 is the
+  // first such level: skeletons only, every body the user's.
   const profile = readProfile()
-  const immersive = Immersive.isState(profile["immersive"]) ? profile["immersive"] : null
-  if (!Immersive.isActive(immersive, new Date())) {
+  const level = Axis.readLevel(profile["global_level"])
+  if (level < 3 || Axis.isOffRamp(level)) {
     process.stderr.write(
-      "error: a build drill needs immersive mode — otherwise the agent can just write it for you.\n" +
-        "start one first: /socratiskill:socratic immersive 45\n",
+      "error: a build drill needs level 3 or higher — below that the agent writes the bodies for you.\n" +
+        "raise it first: /socratiskill:socratic level 3\n",
     )
     process.exit(2)
   }
 
-  const root = ImmersiveReport.repoRoot(process.cwd()) ?? process.cwd()
+  const root = AutonomyReport.repoRoot(process.cwd()) ?? process.cwd()
   const drill: DrillState = {
     kind: "build",
     file: null,
     started_at: new Date().toISOString(),
-    git_baseline: ImmersiveReport.captureBaseline(process.cwd()),
+    git_baseline: AutonomyReport.captureBaseline(process.cwd(), Axis.dayKey(new Date())),
   }
   writeDrill(drill)
 
@@ -356,7 +360,7 @@ function cmdDone(): void {
   const out: string[] = [`drill finished: ${drill.kind}`, `duration: ${mins} min`]
 
   if (drill.kind === "build" && drill.git_baseline) {
-    const lines = ImmersiveReport.linesSinceBaseline(drill.git_baseline)
+    const lines = AutonomyReport.linesSinceBaseline(drill.git_baseline)
     out.push(
       lines
         ? `you wrote: +${lines.added} / -${lines.removed} lines`

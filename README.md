@@ -7,7 +7,7 @@
     ╚══════╝ ╚═════╝  ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝   ╚═╝╚══════╝╚═╝  ╚═╝╚═╝╚══════╝╚══════╝
     ──────────────────────────────────────────────────────────────────────────────────────
     ░▒▓█   A D A P T I V E   S O C R A T I C   M E N T O R   F O R   C L A U D E   █▓▒░
-                       >>  v0.4.1 · MIT · github.com/VicBa2000/socratiskill  <<
+                       >>  v0.5.0 · MIT · github.com/VicBa2000/socratiskill  <<
 ```
 
 # Socratiskill
@@ -18,10 +18,18 @@ escalates hints, detects weaknesses with spaced repetition, forces
 Feynman mode, flags antipatterns, and produces a learning journal —
 all without forking the binary.
 
-Since v0.4 it also ships **immersive mode**: a session where Claude is
-hard-blocked from writing code at all, so you write it and it coaches —
-an antidote to the skill atrophy that comes from directing agents all
-day.
+Since v0.5 there is **one dial**. The level, 1 to 5, answers a single
+question — *how much of the work is yours?* — and everything else follows
+from the answer: what Claude may author, how much it explains, and what
+it hands you to write. At level 3 it writes skeletons and signatures and
+every function body is yours; at level 5 it writes nothing at all and
+just asks. A `PreToolUse` gate enforces it, so above level 1 this is not
+a request Claude can talk itself out of.
+
+That inverts the usual reward: **levelling up means Claude does less for
+you, not more.** For a plugin whose purpose is fighting the skill atrophy
+that comes from directing agents all day, any other direction would be
+training the disease.
 
 The pedagogical layer is a port of [SocraticCode](../opencode) (an
 OpenCode fork). Rather than patching the agent loop, this version
@@ -33,7 +41,7 @@ instructions + TypeScript scripts.
 ## Requirements
 
 - **Claude Code** with plugin + hooks support (`UserPromptSubmit`,
-  `Stop`, and `PreToolUse` for the immersive gate).
+  `Stop`, and `PreToolUse` for the authorship gate).
 - **[bun](https://bun.com)** (runtime for the telemetry scripts).
 - **node** (used only by bootstrap scripts to manipulate JSON without
   depending on `jq`, which is not available in Git Bash on Windows).
@@ -153,17 +161,14 @@ Invoke as `/socratiskill:socratic <arg>`.
 
 | Subcommand | Effect |
 |---|---|
-| `status` (or no args) | Snapshot: enabled, level, mode, speed, copy, streak, calibrated |
+| `status` (or no args) | The whole control panel: the axis (level, what you may author, budget left, rung range), any episode in flight, and today's autonomy numbers |
 | `on` / `off` | Soft toggle of the `enabled` flag. When `off`, the hook still fires but injects only a short DISABLED silencer (~30 tokens) telling the model to behave as default Claude Code. |
 | `pause` / `resume` | **True bypass.** Renames `profile.json` ↔ `profile.json.paused` so the hook short-circuits before producing any output. Emits a one-shot silencer on the very first turn after pause (tells the model to forget skill instructions loaded earlier in the session), then **zero token cost per turn** until resume. Use when you want the plugin truly invisible without uninstalling. |
 | `calibrate` | Self-assessment + level update. `calibrate force` to recalibrate. |
-| `level <1-5>` | Manually set global_level |
-| `mode <learn\|productive>` | Change pedagogical mode |
-| `immersive [on\|<minutes>\|off\|status]` | **Immersive mode** — a third axis where *you* write the code and Claude never does. A `PreToolUse` gate hard-denies Write/Edit/MultiEdit, subagent delegation, and Bash commands that write files. Session-scoped, optionally timeboxed (`immersive 45`). See below. |
-| `unlock <reason>` | Stand the immersive gate down for 10 minutes (`unlock <N> <reason>` for N). Reason required; logged in the session report. Never questioned or moralized about. |
-| `scaffold [<N>|status|close]` | Open a window where the agent may **create files that do not exist yet** — the skeleton of a new project or module. Requires immersive mode. Per-level file allowance, a line cap per file, and a timebox. Editing existing files stays blocked. Lines it writes are subtracted from your autonomy count. |
-| `drill analyze [<file>]` | Get quizzed on code that already exists in your repo. The script picks the file on rotation, not the model. Works with or without immersive mode. |
-| `drill build` | Implement a bounded task from a blank page. Requires immersive mode. Reports lines you wrote on `drill done`. |
+| `level <1-5>` | Set the axis. This is the only pedagogical setting there is. |
+| `ship <reason> [minutes]` | Open a logged escape: Claude writes normally until it expires (default 10 min), then the level re-arms itself. A reason is required — it is the whole accountability mechanism. Never questioned or moralized about. |
+| `drill analyze [<file>]` | Get quizzed on code that already exists in your repo. The script picks the file on rotation, not the model. Works at any level — reading was never the restricted half. |
+| `drill build` | Implement a bounded task from a blank page. Needs level 3+; below that Claude writes the bodies and the drill measures nothing. Reports lines you wrote on `drill done`. |
 | `drill status\|done\|cancel` | Inspect, close, or abandon the running drill |
 | `hint` / `faster` | Raise hint level by 1 (more direct) |
 | `slower` | Lower hint level by 2 (more socratic) |
@@ -214,125 +219,139 @@ manifest".
 4. **Skills** -> `/socratiskill:socratic` (user-invoked) is the
    control panel; `/socratiskill:socratic-ping` is a health probe.
 
-### Immersive mode — the third axis
+### The axis — one dial
 
-Levels 1-5 and the two modes vary exactly one thing: **how much Claude
-explains while it writes your code**. In all ten combinations, Claude
-writes it. That is fine for learning a codebase and useless against a
-different problem — the developer who directs agents all day and slowly
-stops being able to produce code from a blank page.
+Through v0.4 there were three pedagogical axes (level 1-5, mode
+learn/productive, immersive on/off) plus two escape valves. They were
+not really independent: **in all ten level × mode combinations, Claude
+wrote the code.** The level only varied how much it explained. The axis
+measured pedagogical overhead, never authorship — so "you type this one"
+had nowhere to live and had to be bolted on as a separate mode, which
+then needed its own valve, its own window and its own report.
 
-Immersive mode inverts who holds the keyboard.
+v0.5 collapses all of it into one number:
+
+| Level | Claude authors | You write | Rungs | Hands you |
+|---|---|---|---|---|
+| **1** Implementer | the implementation | nothing — you read and get questioned | 5 | — |
+| **2** Framer | structure + trivial bodies | the load-bearing logic | 4-5 | a module |
+| **3** Architect | skeletons and signatures | **every function body** | 3-4 | a unit |
+| **4** Guide | nothing | all of it | 2-3 | a subproblem |
+| **5** Socratic | nothing | all of it, undirected | 0-1 | — |
 
 ```
-/socratiskill:socratic immersive 45     # 45 minutes, ends by itself
-/socratiskill:socratic immersive on     # until you say stop
-/socratiskill:socratic immersive off    # end now + autonomy report
+/socratiskill:socratic level 3
 ```
 
-While it is active:
+The contract lives in `data/levels.json` and nothing may contradict it.
+What used to be separate switches is now just a position on this line:
+old immersive mode is levels 4-5, the old scaffold window is what levels
+2-3 do by default, and `mode: productive` merged into `ship`.
 
-- **Claude cannot write code.** Not "should not" — a `PreToolUse` hook
-  denies `Write`/`Edit`/`MultiEdit`/`NotebookEdit`, refuses delegation to
-  a subagent, and inspects `Bash` commands to block `>` redirects,
-  `tee`, `sed -i`, `git apply` and friends. Running your tests, git,
-  builds and linters stays allowed — that is the point.
-- **The hint ladder is re-read as a coaching ladder.** Same state
-  machine (escalates after two failed answers, jumps to the top when you
-  say "no sé"), different meaning per rung: 0 asks only, 2 points you at
-  code you already wrote elsewhere in the repo, 5 hands over a full
-  **work order** — files, signatures, acceptance criteria, edge cases —
-  and still never code.
-- **The level and mode rules do not apply**, because every one of them
-  is a rule about how Claude writes code. Your level survives as the
-  rung the ladder starts on.
+#### What the gate enforces
 
-Escape hatch: `/socratiskill:socratic unlock <reason>` stands the gate
-down for 10 minutes. It is logged in the session report and never
-argued with — a lock with no exit is a lock you uninstall the first
-Friday it gets in the way.
+Above level 1 this is not a request Claude can talk itself out of. A
+`PreToolUse` hook denies `Write`/`Edit`/`MultiEdit`/`NotebookEdit` on
+files that already exist, refuses delegation to a subagent, and inspects
+`Bash` to block `>` redirects, `tee`, `sed -i`, `git apply` and friends.
+Running your tests, git, builds and linters stays allowed — that is the
+point.
 
-The plugin's own state stays writable while the gate is closed, so
-`off`, `pause`, `level` and `challenge` can never be locked behind it.
+Three layers, in the order they fire:
+
+1. **Create vs edit.** Whether a file already exists is a *fact*.
+   "Is this boilerplate or the code that teaches you?" is a *judgment*,
+   and a judgment handed to the model is one its helpfulness gradient
+   widens until the exception swallows the feature. So the gate only
+   ever checks the fact.
+2. **Shape.** A file Claude creates must *look like a skeleton*. Rather
+   than trying to detect an implementation — open-ended, and a model can
+   out-invent any blacklist — the gate asserts the closed property:
+   every line is classified, and anything it does not recognise counts as
+   an executable statement. Unknown syntax and unlisted languages fail
+   **closed** by construction. At levels 3-5 the allowance is zero:
+   imports, types, signatures, comments and `TODO`s, nothing that runs.
+3. **Budget.** A daily cap on new files, so a fooled gate is bounded.
+
+The plugin's own state stays writable throughout, so `off`, `pause`,
+`level` and `challenge` can never be locked behind the gate.
+
+#### The ladder — the dial *inside* your level
+
+Same state machine as always: escalates after two failed answers, jumps
+to the top when you say "no sé", drops on a success. Each rung means
+something different now that "more help" can no longer mean "more code":
+0 asks only, 2 points you at code you already wrote elsewhere in the
+repo, 5 hands over a full **work order** — files, signatures, acceptance
+criteria, edge cases — and still never code.
+
+Level and rung are deliberately *not* the same dial. The level is your
+stable band and moves by calibration over days; the rung is the reaction
+inside one problem and moves over minutes. Collapsing them would mean
+getting stuck on a single bug demotes you.
+
+#### The handoff (levels 2-4)
+
+    frame → name the unit → acceptance criteria → STOP → evaluate → next
+
+Claude delivers the structure its level allows, names **one** unit, and
+states acceptance criteria *before any code exists* — which is what makes
+the later review objective instead of a matter of taste. Then it stops.
+When you come back it reviews against those criteria, and only then moves
+on.
+
+A unit that fails gets **handed back, not fixed**. It is the most
+valuable turn in the loop: the only moment you find your own gap while
+it is still warm.
+
+#### The escape
+
+```
+/socratiskill:socratic ship "prod hotfix" 20
+```
+
+Claude writes normally until it expires, then the level re-arms itself.
+A reason is required and logged; it is never questioned or moralized
+about. A lock with no exit is a lock you uninstall the first Friday it
+gets in the way — and flattery and scolding are the same error of not
+respecting your decision.
 
 #### Autonomy report
 
-Ending a session (manually or by timebox) prints:
+`status` prints, per day and per repository:
 
 ```
-immersive session ended (timebox elapsed)
-duration: 45 min
-you wrote: +127 / -34 lines
+autonomy — 2026-09-01 (level 3)
+you wrote: +127 / -34 lines in /home/you/project
+created by the agent: +18 lines across 2 file(s) (excluded from the count above)
 turns where you produced code: 6 / 11
 average ladder rung: 2.3 (lower = you needed less help)
-unlocks: 1 (5 min total) — prod hotfix
+escapes: 1 (5 min total) — prod hotfix
+note: code the agent wrote during an escape is included in the line count above.
 ```
 
 The line count comes from git, not from Claude's self-report: with the
-gate closed, whatever appeared in the working tree came from your hands.
-It survives mid-session commits (which move `HEAD` and reset the
+gate armed, what appears in the working tree came from your hands. It
+survives mid-session commits (which move `HEAD` and reset the
 working-tree diff) and counts files you have not `git add`ed yet —
-starting a project means creating files, and `git diff HEAD` alone
-would report all of that as zero. If you used an unlock, the report says so — code
-Claude wrote in that window is counted in, and a caveat is cheaper than
-a number you would wrongly trust.
+starting something new means creating files, and `git diff HEAD` alone
+would report all of that as zero.
 
-Totals per period land in `journal` under `## Autonomy (immersive mode)`.
-There is no score and no goal: the signal is the trend across two
-journals, and a composite index would be a number this plugin invented.
+Baselines are kept **per repository** and roll over daily, so changing
+projects mid-day measures the new project instead of quietly reporting on
+the one you left.
 
-#### Scaffolding without breaking the mode
+Two deliberate asymmetries in how honest the number is:
 
-Typing an empty `index.html`, a `package.json` and a folder of blank
-components teaches nothing. It is not the muscle immersive mode exists
-to rebuild, and forcing it burns the most expensive minutes of a session
-on its least valuable work — which is how the mode gets uninstalled.
+- Lines Claude wrote by **creating a file** are subtracted exactly — the
+  gate saw every one of them.
+- Lines it wrote during an **escape** cannot be told apart from yours in
+  the same working tree, so the report *says so* rather than implying a
+  clean number.
 
-So there is a window for it, and **the model cannot open it**:
-
-```
-/socratiskill:socratic scaffold        # per-level file allowance
-/socratiskill:socratic scaffold 8      # explicit count
-/socratiskill:socratic scaffold status | close
-```
-
-The enforced line is **create vs edit**, not "boilerplate vs real code".
-That distinction matters: whether a file already exists is a fact the
-gate can check, while "is this tedious enough to hand over?" is a
-judgment — and a judgment handed to the model is one its helpfulness
-gradient widens until the exception swallows the feature. So, with a
-window open:
-
-| | |
-|---|---|
-| `Write` to a file that does not exist | allowed, within the line cap |
-| `Write` to a file that does exist | denied — that is an edit |
-| `Edit` / `MultiEdit` | denied, window or no window |
-| Bash writes, subagents | denied, as always |
-
-Allowances scale with level (`data/algorithm.json`): a novice gets 2
-files, an expert 12. The level scales the **size** of the window, never
-the category of what is allowed — for a beginner, typing boilerplate
-still builds fluency; for an experienced developer it does not. The
-per-file line cap is flat, because tedium does not scale with level.
-
-The model may **suggest** the command when you describe starting
-something new. It may never infer the grant from prose: "hagamos la
-landing" opens nothing.
-
-Every line written inside a window is counted and **subtracted** from
-your autonomy number:
-
-```
-you wrote: +142 / -18 lines
-scaffolded by the agent: +76 lines in 1 window(s) (excluded from the count above)
-```
-
-This is the one place the measurement gets *better* rather than merely
-honest: with `unlock`, the agent's work is indistinguishable from yours
-in the same working tree and the report can only disclose the
-contamination. With a scaffold window the gate sees each file it
-permits, so the subtraction is exact.
+Totals per period land in `journal` under `## Autonomy`. There is no
+score and no goal: the signal is the trend across two journals, and a
+composite index would be a number this plugin invented.
 
 #### Drills
 
@@ -346,37 +365,36 @@ script** — asked to choose, a model reliably picks something short and
 convenient, and you cannot steer it either. It then asks one question
 per turn, escalating from "what does this do" to "what breaks if I
 remove this". Wrong answers become Leitner cards and come back
-scheduled. It works with or without immersive mode; reading was never
-the thing being restricted.
+scheduled. It works at any level; reading was never the restricted half.
 
-`build` requires immersive mode, proposes one bounded task from your
+`build` needs level 3 or higher, proposes one bounded task from your
 repo, and fixes acceptance criteria **before** any code exists — which
 is what makes the closing review objective rather than a matter of
 taste.
 
 ### Per-level protocols
 
-Each user level has a **canonical behavior** that the model should
-exhibit reliably, independently of the soft markdown rules. Since
-soft sentences can drift against the system prompt's pull toward
-"be helpful, complete tasks", an imperative protocol block is
-injected at the end of every `SOCRATIC CONTEXT` block for L1-L4,
-calibrated to the level's role and attenuated by `mode`. L5 (silent
-colleague) gets no injection — it is the default Claude Code
-behavior.
+Soft sentences in markdown drift against the system prompt's pull toward
+"be helpful, complete tasks", so an imperative protocol block is injected
+at the end of every `SOCRATIC CONTEXT`, right before the model generates.
+It is chosen by **level and nothing else** — there is no mode to cross it
+with, because "who writes the code" *is* the level.
 
-| Level | Role                  | Initial hint | Canonical behavior (learn) |
-|-------|-----------------------|--------------|----------------------------|
-| L1    | Live teacher          | 5            | Restate → plan → teach → ONE comprehension question. END turn. MAX 30 lines / 1 file per turn. No Write/Edit without explicit approval in THIS turn. |
-| L2    | Teacher with context  | 4            | Before non-trivial decisions, state the WHY in 1-2 sentences. After each new block, ONE comprehension question. Block-by-block, never line-by-line. |
-| L3    | Pair programmer       | 2            | "What approach do you have in mind?" before non-trivial implementations. Gapped code (`___`) in at least one spot per turn. Gaps raised as questions, not corrections. |
-| L4    | Code reviewer         | 1            | Before accepting a proposal, raise at least ONE challenge as a question: edge case, security, scalability, or alternative. No explanations of basics. |
-| L5    | Silent colleague      | 0            | Pure code assistant. Intervenes only for vulnerabilities, serious bugs, anti-patterns, or significantly better alternatives. |
+| Level | Canonical behavior |
+|-------|--------------------|
+| **1** Implementer | Restate → plan → teach → ONE comprehension question. END turn. MAX 30 lines / 1 file per turn. No Write/Edit without explicit approval in THIS turn. Every line still has to teach, or this is level 6 with extra words. |
+| **2** Framer | Frame the module; leave every load-bearing body empty with a `TODO`. Hand over one module with acceptance criteria, then stop. Trivial bodies allowed (8 statements/file). |
+| **3** Architect | Skeletons and signatures only — **zero** executable statements per file. Decompose into ordered units, hand over one, state criteria, stop. Never solve the first "to show the pattern". |
+| **4** Guide | Write nothing. Point at an analogous case already solved in *their* repo (Read/Grep are yours). Decompose; hand over the first subproblem. |
+| **5** Socratic | Write nothing, direct nothing. Questions only, orientation at most after two failures. Do not decompose — that is a level-4 move and the most common leak. |
+| **6** Autopilot | The axis off. Plain code assistant, no pedagogy, no commentary about being here. |
 
-In `productive` mode, the L2-L4 blocks are attenuated: L2 drops to
-one WHY sentence per non-obvious decision; L3 skips the approach
-preamble and gapped code; L4 flags only critical issues as brief
-questions.
+Level 6 is reachable only by typing it: calibration clamps at 5 and can
+never promote there. It is deliberately absent from the subcommand table
+above — an anti-atrophy plugin that advertises its own off switch is
+working against itself — but `status` always names it, because
+discouraging discovery is not the same as hiding state from someone who
+already turned it on.
 
 ### Calibration and anti-adulation gates
 
@@ -452,22 +470,31 @@ journal/                      daily/weekly/monthly markdown rollups
 
 ## Honest limitations
 
-- **Soft enforcement everywhere except immersive mode.** The level
-  protocols, antipatterns and pedagogical rules are injected as text and
-  depend on the model obeying them (observed consistently with Opus 4.7,
-  but not guaranteed). Only immersive mode uses the `PreToolUse` hook to
-  actually deny tool calls; everything else is instruction.
-- **The immersive gate blocks tools, not text.** It cannot stop Claude
-  from pasting code into the chat for you to copy. The rules forbid it
-  and nothing enforces it — if that happens, the mode has failed and
-  only you will notice.
+- **Authorship is enforced; pedagogy is not.** Above level 1 the
+  `PreToolUse` gate actually denies tool calls. Everything else — how
+  much Claude explains, the antipatterns, the handoff protocol — is
+  injected as text and depends on the model obeying it (observed
+  consistently with Opus 4.7, but not guaranteed).
+- **The gate blocks tools, not text.** It cannot stop Claude from
+  pasting code into the chat for you to copy. The rules forbid it and
+  nothing enforces it — if that happens, the level has failed and only
+  you will notice.
+- **A new file can still hide an implementation.** The shape check makes
+  this expensive rather than impossible: unknown syntax counts as an
+  executable statement and the write is denied, but the check is
+  line-based and no substitute for reading the diff. The daily budget
+  bounds the damage; the ledger keeps the *measurement* honest even when
+  the gate is fooled, since those lines are attributed to Claude anyway.
 - **Nothing stops you opening a second Claude Code window** without the
-  plugin. Immersive mode is voluntary training; route around it and
-  there is no one to fool but yourself. The plugin does not police this
-  and will not ask about it.
+  plugin. This is voluntary training; route around it and there is no
+  one to fool but yourself. The plugin does not police this and will not
+  ask about it.
 - **The autonomy line count is repo-wide.** It measures what changed in
-  the working tree, which during an unlock includes code Claude wrote.
-  The report discloses this rather than implying a clean number.
+  the working tree, which during a `ship` escape includes code Claude
+  wrote. The report discloses this rather than implying a clean number.
+- **The axis says nothing about code quality.** Writing bad code
+  unassisted still trains the muscle. Reviews are honest, but the goal
+  is production, not perfection.
 - **Initial calibration is a self-assessment**, not diagnostic. A
   version with 5 scoreable technical questions is future work.
 - **Session files are per-UTC-day**, not per-Claude-Code-session. Two
@@ -572,16 +599,18 @@ isolated temp dirs: calibration (per-level up/down thresholds,
 weighted scoring by hint level, topic-diversity floor, depth-
 diversity floor, the 3-turn diagnostic gate, and the anti-
 adulation injection during the diagnostic), hint escalation,
-per-level protocol blocks for L1-L4 across both `learn` and
-`productive` modes, antipatterns, Feynman mode, Leitner spaced
-repetition, journal generation, install/uninstall idempotence,
-the pause/resume cycle, the `enabled=false` silencer, and the whole
-immersive axis: the gate (write tools, subagent delegation, bash
-write-detection with a false-positive battery), unlock grant/expiry,
-timebox expiry and its report, the git-based autonomy measurement
-across a mid-session commit, drill selection and rotation, and the
-control-plane exemption that keeps the gate from locking you out of
-its own off switch.
+per-level protocol blocks for all six levels, antipatterns, Feynman
+mode, Leitner spaced repetition, journal generation,
+install/uninstall idempotence, the pause/resume cycle, the
+`enabled=false` silencer, and the whole axis: the gate (create-vs-edit,
+the shape check against real TS/Python/C# skeletons *and* real
+implementations, the daily budget, subagent delegation, bash
+write-detection with a false-positive battery), the `ship` escape and
+its expiry, the v0.4→v0.5 profile migration, the handoff protocol and
+unit continuity across turns, the git-based autonomy measurement across
+a mid-session commit and across two repositories, drill selection and
+rotation, and the control-plane exemption that keeps the gate from
+locking you out of its own off switch.
 
 **`run-security.sh`** runs adversarial tests against the audit guards:
 hostile `STATE_DIR` values to `uninstall.sh` (path traversal, root,
@@ -590,7 +619,7 @@ write under interruption, concurrent RMW on `profile.json`,
 antipattern regex bounds, hostile stdin to the hooks, and topic
 injection (null bytes, RTL unicode, shell metacharacters).
 
-Combined: **237 assertions, all green** as of v0.4.1.
+Combined: **290 assertions, all green** as of v0.5.0.
 
 For a manual end-to-end in a live Claude Code session, see
 [MANUAL-TEST.md](./MANUAL-TEST.md).
@@ -605,23 +634,26 @@ hooks/
   hooks.json           plugin manifest hook declarations (auto-registered)
 skills/
   socratic/            user-invoked control panel (/socratiskill:socratic)
-    rules/             level 1-5, modes, hint ladder, feynman, review,
-                       antipatterns, immersive + immersive-ladder, drills
+    rules/             level 1-6, axis, ladder, handoff, feynman, review,
+                       antipatterns, drills
   socratic-ping/       health probe (/socratiskill:socratic-ping)
   socratic-mentor/     model-invoked soft reinforcement
 scripts/
   hook-pre-prompt.sh   UserPromptSubmit hook -> build-context.ts
   hook-post-turn.sh    Stop hook -> record-turn.ts
   hook-pre-tool.sh     PreToolUse hook -> gate-tool.ts. Short-circuits in
-                       bash builtins when immersive is off, so the tool
-                       call it cannot block costs as little as possible
+                       bash builtins on levels 1 and 6, so the tool call
+                       it cannot block costs as little as possible
   build-context.ts     emits the SOCRATIC CONTEXT block per turn
   record-turn.ts       parses HINT_META, updates session/error-map/antipatterns
-  gate-tool.ts         immersive gate: denies write tools, subagent
-                       delegation, and bash used as an editor
-  immersive-state.ts   pure state + the re-read 0-5 ladder
-  immersive.ts         immersive on/off/status + unlock CLI
-  immersive-report.ts  git-based autonomy measurement
+  gate-tool.ts         the authorship gate: create-vs-edit, shape, budget,
+                       subagent delegation, bash used as an editor
+  axis-state.ts        pure contract: levels, rungs, budget, escape
+  shape-check.ts       "is this a skeleton?" — fails closed by design
+  status.ts            the single control panel
+  escape.ts            `ship` — the logged escape hatch
+  autonomy-report.ts   git-based measurement, per repo, per day
+  migrate-profile.ts   v0.4.x -> v0.5 schema migration
   drill.ts             analyze / build drill selection and state
   state-io.ts          atomic writes, O_EXCL locks, schema-validated reads
   detector.ts          heuristics: zero-knowledge, copy-paste, slow-down
@@ -634,7 +666,7 @@ scripts/
 data/                  domains, prerequisites, technical terms, antipatterns,
                        roles, algorithm constants
 tests/
-  run-all.sh           29 scenarios, 197 assertions (functional)
+  run-all.sh           33 scenarios, 250 assertions (functional)
   run-security.sh      8 scenarios, 40 assertions (adversarial)
 sistemas.txt           full technical reference (rules, thresholds,
                        state files, hooks, every system)

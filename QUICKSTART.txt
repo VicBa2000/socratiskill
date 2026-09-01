@@ -209,51 +209,63 @@
     to script it from a CI / wrapper.
 
   ------------------------------------------------------------------
-  2.3 CHANGE THE LEVEL / MODE
+  2.3 CHANGE THE LEVEL
   ------------------------------------------------------------------
-    /socratiskill:socratic level 3      -> set user level (1..5)
-    /socratiskill:socratic mode learn       -> prioritize teaching
-    /socratiskill:socratic mode productive  -> prioritize speed
+    /socratiskill:socratic level 3      -> set the axis (1..5)
 
-    Levels 1..5 in short (canonical behavior — enforced via a
-    per-level protocol block injected on every turn for L1-L4):
+    There is ONE pedagogical setting. The level answers one question
+    and everything else follows from the answer:
 
-      1 Novice        Live teacher
-          Restate → plan → teach → ONE comprehension question.
+              HOW MUCH OF THE WORK IS YOURS?
+
+    Going UP means Claude does LESS for you, not more. That is the
+    point: a plugin that rewarded competence by writing more of your
+    code would be training the atrophy it exists to fight.
+
+      1 Implementer   Claude writes the code
+          Restate -> plan -> teach -> ONE comprehension question.
           END turn, wait for approval. MAX 30 lines / 1 file per
-          turn. No Write/Edit without explicit approval THIS turn.
-          Starts at hint level 5 (full scaffolding).
+          turn. Every line still has to teach.
+          Rung 5 (full explanation).
 
-      2 Basic         Teacher with context
-          Explains the WHY of every non-trivial decision. One
-          comprehension question after each new block. Block-by-
-          block, not line-by-line.
-          Starts at hint level 4 (explanation + verification).
+      2 Framer        Claude frames, you write the logic
+          It creates the file with structure, imports, signatures
+          and the trivial bodies; the load-bearing logic is yours.
+          Hands you one MODULE at a time with acceptance criteria.
+          Rungs 4-5.
 
-      3 Intermediate  Pair programmer
-          Asks "what approach do you have in mind?" before non-
-          trivial implementations. Gapped code (___) in at least
-          one spot per turn. Trivial edits go direct.
-          Starts at hint level 2 (analogy).
+      3 Architect     Claude writes skeletons, you write bodies
+          Signatures and TODOs only -- ZERO executable statements
+          per file. Hands you one UNIT at a time.
+          Rungs 3-4.  <- the working level for most people
 
-      4 Advanced      Code reviewer
-          Raises at least ONE challenge as a question before
-          accepting a proposal: edge case, security, scalability,
-          or alternative. No explanations of basics.
-          Starts at hint level 1 (orientation).
+      4 Guide         Claude writes nothing
+          Breaks the problem into ordered subproblems and points
+          you at code you already wrote elsewhere in your repo.
+          Hands you one SUBPROBLEM at a time.
+          Rungs 2-3.
 
-      5 Expert        Silent colleague
-          Pure code assistant. Intervenes only for real issues
-          (vulnerability, serious bug, anti-pattern, significantly
-          better alternative). No pedagogical injection.
-          Starts at hint level 0 (pure socratic).
+      5 Socratic      Claude writes nothing and directs nothing
+          Questions only. It will not even decompose for you.
+          Rungs 0-1.
 
-    In `mode productive`, the L2-L4 protocols are attenuated: L2
-    uses a single WHY sentence, L3 drops the approach preamble
-    and gapped code, L4 flags only critical issues briefly. L1
-    is the same in both modes — its hard limits are not
-    negotiable.
+    The gate is real above level 1: Write/Edit on an existing file
+    is DENIED by a PreToolUse hook, along with subagent delegation
+    and bash used as an editor (cat >, tee, sed -i, git apply).
+    Running your tests, git, builds and linters stays allowed --
+    that is exactly what you should be doing.
 
+    At levels 2-5 Claude may still CREATE files that do not exist
+    (an empty package.json, a blank component), within a daily
+    budget and a per-file line cap. Typing boilerplate teaches
+    nothing. But what it puts in them is checked: at levels 3-5 a
+    new file must contain zero executable statements.
+
+    `mode learn` / `mode productive` are GONE. They said the same
+    thing the level now says, and "I need to ship right now" is
+    covered by `ship` (see 2.9).
+
+  ------------------------------------------------------------------
   ------------------------------------------------------------------
   2.4 ASK FOR MORE / LESS GUIDANCE DURING A CONVERSATION
   ------------------------------------------------------------------
@@ -346,79 +358,74 @@
 
 
   ------------------------------------------------------------------
-  2.9 TRAIN YOUR OWN HANDS (immersive mode)
+  2.9 WHEN YOU NEED TO SHIP RIGHT NOW
   ------------------------------------------------------------------
-    Everything above changes how much Claude explains WHILE IT WRITES
-    your code. Immersive mode changes who writes it.
+    /socratiskill:socratic ship "prod hotfix"
+    /socratiskill:socratic ship 25 "demo del viernes"
+    /socratiskill:socratic ship --status | --end
 
-      /socratiskill:socratic immersive 45      -> 45 min, ends alone
-      /socratiskill:socratic immersive on      -> until you say stop
-      /socratiskill:socratic immersive off     -> end now + report
-      /socratiskill:socratic immersive status  -> time left, unlocks
+    Claude writes normally until the window expires (default 10 min),
+    then your level re-arms by itself. A reason is REQUIRED and gets
+    logged.
 
-    While it is on, Claude CANNOT write code. Not "will try not to" —
-    a PreToolUse hook denies Write/Edit/MultiEdit, refuses to hand the
-    job to a subagent, and blocks Bash commands that write files
-    (> redirects, tee, sed -i, git apply). Running your tests, git,
-    builds and linters keeps working; that is the point.
+    Claude will not question it, will not remind you of your goals,
+    and will not act disappointed. Real work has real deadlines, and
+    a lock with no exit is a lock you uninstall the first Friday it
+    gets in the way. The log is the accountability; commentary is
+    not. (This replaces v0.4's `unlock` and `mode productive`, which
+    were asking the same thing in two different ways.)
 
-    What Claude does instead is coach, at the rung the hint ladder is
-    currently on. Same escalation you already know — two wrong answers
-    or a "no sé" moves it up a rung — but the meanings change:
+  ------------------------------------------------------------------
+  2.9b THE HANDOFF (levels 2-4)
+  ------------------------------------------------------------------
+    At levels 2, 3 and 4 the work comes to you one piece at a time:
 
-      rung 0  asks only: "¿cómo lo abordarías?"
-      rung 1  names the file or module. Not what to do in it.
-      rung 2  points you at code you already wrote elsewhere here
-      rung 3  splits it into ordered subproblems, solves none
-      rung 4  explains the approach, makes you restate it first
-      rung 5  full work order: files, signatures, acceptance
-              criteria, edge cases. Still not one line of code.
+      frame -> name the unit -> acceptance criteria -> STOP
+            -> you implement -> Claude evaluates -> next
 
-    You can steer it by hand as always: `hint` for more help,
-    `slower` for less.
+    Claude states the acceptance criteria BEFORE any code exists.
+    That is what makes the review objective instead of a matter of
+    taste. Then it stops and waits for you.
 
-    Arrancando algo nuevo (proyecto, pagina, modulo)? El esqueleto
-    vacio no te entrena nada, asi que hay una ventana para eso:
+    When you come back it reviews against those criteria: it points
+    at the line, names the problem, and asks what you would do. It
+    will NOT hand you the corrected version -- that is just writing
+    the code with extra steps.
 
-      /socratiskill:socratic scaffold          -> cupo segun tu nivel
-      /socratiskill:socratic scaffold 8        -> 8 archivos
-      /socratiskill:socratic scaffold status|close
+    If your implementation misses a criterion, it gets handed back,
+    not fixed. That is the most useful turn in the whole loop: the
+    only moment you find your own gap while it is still warm.
 
-    Con la ventana abierta el agente puede CREAR archivos que no
-    existen. Editar los que ya existen sigue bloqueado — crear es
-    estructurar, editar es implementar. Las lineas que escriba se
-    cuentan y se DESCUENTAN de tu numero de autonomia.
+  ------------------------------------------------------------------
+  2.9c THE AUTONOMY NUMBER
+  ------------------------------------------------------------------
+    /socratiskill:socratic status  -> includes today's report:
 
-    Claude puede sugerirte el comando; no puede abrirlo solo. Pedirle
-    "hagamos la landing" en prosa no concede nada.
-
-    Real deadline mid-session:
-
-      /socratiskill:socratic unlock prod hotfix       -> 10 min
-      /socratiskill:socratic unlock 30 migracion      -> 30 min
-
-    The gate stands down and re-arms by itself. The reason is logged
-    in your session report. You will not be asked "are you sure" and
-    you will not be lectured about it — that is a deliberate rule, not
-    an oversight.
-
-    When the session ends (either way) you get:
-
-      immersive session ended (timebox elapsed)
-      duration: 45 min
-      you wrote: +127 / -34 lines
+      autonomy — 2026-09-01 (level 3)
+      you wrote: +127 / -34 lines in /home/you/project
+      created by the agent: +18 lines across 2 file(s) (excluded above)
       turns where you produced code: 6 / 11
       average ladder rung: 2.3 (lower = you needed less help)
-      unlocks: 1 (5 min total) — prod hotfix
+      escapes: 1 (5 min total) — prod hotfix
 
     The line count comes from git, not from Claude's opinion: with the
-    gate closed, whatever showed up in your working tree came from
-    you. It survives committing mid-session. If you used an unlock,
-    the report says the count includes whatever Claude wrote in that
-    window — better a caveat than a number you would trust wrongly.
+    gate armed, whatever showed up in your working tree came from you.
+    It survives committing mid-session and counts files you have not
+    `git add`ed yet.
+
+    Baselines are per REPOSITORY and reset daily, so switching
+    projects mid-day measures the new one instead of quietly
+    reporting on the one you left.
+
+    Two honesty rules worth knowing:
+      - Lines Claude wrote by CREATING a file are subtracted exactly
+        (the gate saw every one of them).
+      - Lines it wrote during a `ship` window cannot be told apart
+        from yours, so the report SAYS SO instead of pretending.
 
     Totals per period land in your journal under "## Autonomy".
 
+  ------------------------------------------------------------------
   ------------------------------------------------------------------
   2.10 DRILLS (deliberate practice from your own repo)
   ------------------------------------------------------------------
@@ -433,10 +440,12 @@
     something comfortable — then asks one question per turn, working
     up from "what does this do" to "what breaks if I delete this
     line". Wrong answers become Leitner review cards and come back
-    scheduled. Works with or without immersive mode.
+    scheduled. Works at ANY level -- reading was never the half that
+    got restricted.
 
     BUILD answers "could I still start from a blank page?". It needs
-    immersive mode on. Claude proposes one bounded task from your repo
+    level 3 or higher -- below that Claude writes the bodies and the
+    drill measures nothing. It proposes one bounded task from your repo
     and agrees the acceptance criteria with you BEFORE any code
     exists, then stays out of the way. `drill done` reports how many
     lines you wrote and reviews against those criteria.
@@ -449,19 +458,21 @@
 ================================================================================
 
   ------------------------------------------------------------------
-  3.1 DAILY CODING (level 3 or 4, mode productive)
+  3.1 DAILY CODING (level 3)
   ------------------------------------------------------------------
-    Start: /socratiskill:socratic mode productive
-    Work normally. Claude asks before writing, flags issues, answers
-    without hand-holding.
+    Start: /socratiskill:socratic level 3
+    Claude sets up the files and signatures, hands you one unit at a
+    time with acceptance criteria, and reviews what you write. When a
+    deadline hits: /socratiskill:socratic ship "why".
     End of day: /socratiskill:socratic journal
     -> see what you practiced and where you struggled.
 
   ------------------------------------------------------------------
-  3.2 LEARNING A NEW TOPIC (level 2 or 3, mode learn)
+  3.2 LEARNING A NEW TOPIC (level 1 or 2)
   ------------------------------------------------------------------
-    Start: /socratiskill:socratic mode learn
-    Ask the topic. Claude explains with verification questions.
+    Start: /socratiskill:socratic level 2
+    Ask the topic. Claude frames the module and hands you the part
+    that actually decides something, with verification questions.
     If it goes too fast: /socratiskill:socratic slower
     If too slow:        /socratiskill:socratic faster
     Once you think you get it:
@@ -602,14 +613,15 @@
 
 
   ------------------------------------------------------------------
-  CLAUDE REFUSES TO WRITE CODE AND MENTIONS "IMMERSIVE"
+  CLAUDE REFUSES TO EDIT A FILE AND MENTIONS MY LEVEL
   ------------------------------------------------------------------
-    Working as designed: you have an immersive session running.
-    Check with /socratiskill:socratic immersive status.
+    Working as designed: above level 1, editing an existing file is
+    yours to do. Check where you are with
+    /socratiskill:socratic status.
 
     To get code again, pick one:
-      /socratiskill:socratic unlock <reason>   temporary (10 min)
-      /socratiskill:socratic immersive off     end the session
+      /socratiskill:socratic ship "<why>"    temporary (10 min)
+      /socratiskill:socratic level 1         Claude writes again
 
     If a Bash command was denied and it genuinely was not writing a
     file, it hit a false positive in the write detector — run it
@@ -617,16 +629,25 @@
     a workaround.
 
   ------------------------------------------------------------------
-  I CANNOT TURN THE PLUGIN OFF WHILE IMMERSIVE IS ON
+  CLAUDE CREATED A FILE BUT LEFT EVERY FUNCTION EMPTY
+  ------------------------------------------------------------------
+    Also by design. At levels 3-5 a file it creates must contain zero
+    executable statements: imports, types, signatures, comments and
+    TODOs. The empty function you have to fill IS the exercise.
+
+    If you want the bodies too, either drop to level 2 (trivial
+    bodies allowed) or level 1 (it writes everything).
+
+  ------------------------------------------------------------------
+  I CANNOT TURN THE PLUGIN OFF AT A HIGH LEVEL
   ------------------------------------------------------------------
     You can: the gate always allows writes to ~/.claude/socratic/,
-    so socratic off, level N, pause and immersive off all work while
-    the mode is active. If something ever does block them, the
-    filesystem escape is:
+    so socratic off, level N and pause all work at any level. If
+    something ever does block them, the filesystem escape is:
 
       bash <plugin-root>/scripts/pause.sh
 
-    or delete the "immersive" key from ~/.claude/socratic/profile.json
+    or set "global_level" to 1 in ~/.claude/socratic/profile.json
 
 ================================================================================
   6. DISABLE / PAUSE / UNINSTALL

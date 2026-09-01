@@ -19,16 +19,19 @@ import { homedir } from "node:os"
 import { join, dirname } from "node:path"
 import { HintState } from "./hint-state"
 import { StateIO } from "./state-io"
-import ROLES_JSON from "../data/roles.json"
+import { Axis } from "./axis-state"
+import LEVELS_JSON from "../data/levels.json"
 
-const ROLES: Record<number, string> = (() => {
-  const out: Record<number, string> = {}
-  for (const [k, v] of Object.entries(ROLES_JSON as Record<string, unknown>)) {
-    if (k.startsWith("_")) continue
-    const n = Number(k)
-    if (!Number.isNaN(n) && typeof v === "string") out[n] = v
+/**
+ * Role names come from the axis contract now, not a separate roles.json.
+ * Two files naming the same levels is how they drift.
+ */
+const LEVEL_TABLE: Axis.LevelTable | null = (() => {
+  try {
+    return (LEVELS_JSON as { levels?: Axis.LevelTable }).levels ?? null
+  } catch {
+    return null
   }
-  return out
 })()
 
 function stateDir(): string {
@@ -69,7 +72,10 @@ function main(): void {
     const profile = readJson<Record<string, unknown>>(profilePath, {})
     pending = profile["pending_calibration_change"] as Pending | undefined
     if (!pending) return
-    newLevel = HintState.clampUserLevel(Number(pending.to))
+    // R6.1: an automatic path may never land on the off ramp. Clamping
+    // to the pedagogical axis is what keeps `accept` from promoting a
+    // user into "the agent does everything".
+    newLevel = Axis.clampToAxis(Number(pending.to))
     profile["global_level"] = newLevel
     delete profile["pending_calibration_change"]
     // Clear any stale diagnostic — it belongs to the previous level.
@@ -82,7 +88,7 @@ function main(): void {
     process.exit(2)
   }
 
-  const role = ROLES[newLevel] ?? "Pair programmer"
+  const role = Axis.spec(newLevel, LEVEL_TABLE).label
 
   const sessPath = join(stateDir(), "sessions", `${todayIso()}.json`)
   type SessionDoc = {

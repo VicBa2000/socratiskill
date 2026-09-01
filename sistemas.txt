@@ -1,22 +1,22 @@
 SOCRATISKILL — PEDAGOGY, PROGRESSION, AND DETECTION SYSTEMS
 ================================================================
 
-Technical reference for every internal system of the plugin: roles
-per level, modes, hint ladder, calibration system (level up / level
-down), per-turn detectors, domain taxonomy, antipatterns, Feynman
-mode, spaced repetition, hooks, persistent state, and plugin
-states.
+Technical reference for every internal system of the plugin: the
+axis, the ladder, the calibration system (level up / level down),
+per-turn detectors, domain taxonomy, antipatterns, Feynman mode,
+spaced repetition, hooks, persistent state, plugin states, and the
+authorship gate.
 
-Updated after immersive mode (v0.4, August 2026).
+Updated after the axis unification (v0.5, September 2026).
 
 
 TABLE OF CONTENTS
 -----------------
 
   1. System overview
-  2. User levels (L1-L5)
-  3. Modes (learn / productive)
-  4. Hint ladder (0-5)
+  2. The axis (L1-L5, plus the L6 off ramp)
+  3. The ladder (0-5) — the dial inside the level
+  4. Ladder mechanics (state machine)
   5. Calibration system (level up / level down)
        5.1 Per-turn telemetry (HINT_META)
        5.2 Per-level thresholds
@@ -34,14 +34,18 @@ TABLE OF CONTENTS
  12. Injection channels (hooks)
  13. Persistent state (files)
  14. Plugin states (enabled / paused / disabled / reset)
- 15. Immersive mode (v0.4) — the third axis
-       15.1 Why the other axes do not solve it
-       15.2 The gate (hard enforcement)
-       15.3 The immersive ladder
-       15.4 Unlock
-       15.5 Autonomy report
-       15.6 Drills
-       15.7 Scaffold window (v0.4.1)
+ 15. The authorship gate (v0.5)
+       15.1 The mechanism
+       15.2 The three layers (create-vs-edit, shape, budget)
+       15.3 Polarity warning (do not "harmonize")
+       15.4 What is blocked
+       15.5 Fail-open paths + the locked-room exemption
+       15.6 Cost
+       15.7 Level 6 — the off ramp
+       15.8 The escape (`ship`)
+       15.9 The handoff (L2-L4)
+      15.10 Autonomy measurement
+      15.11 Honest limits
 
 
 ================================================================
@@ -57,16 +61,25 @@ WITHOUT modifying the binary. The logic lives in three layers:
   3. State on disk (`~/.claude/socratic/`) that the model consults
      as each session starts.
 
-The system exposes TWO orthogonal axes that define per-turn
-behavior:
+Since v0.5 there is ONE axis and one dial inside it:
 
-  - USER LEVEL (1-5): the pedagogical role the model plays.
-    Changes slowly, driven by accumulated evidence or manual
-    override.
+  - LEVEL (1-5): how much of the work is the user's. Changes
+    slowly, driven by accumulated evidence or manual override. It
+    decides what the agent may author, and the gate enforces that
+    part rather than merely asking for it.
 
-  - HINT LEVEL (0-5): how much scaffolding this turn's response
-    carries. Changes quickly based on successes/failures within
-    the session.
+  - RUNG (0-5): how much help the user gets while doing their half.
+    Changes quickly based on successes/failures within the session,
+    bounded by the level's allowed range.
+
+Through v0.4 there were three pedagogical axes plus two escape
+valves. They were not really independent: in all ten level x mode
+combinations the agent wrote the code, and the level only varied how
+much it explained. The axis measured pedagogical overhead, never
+authorship — so "you type this one" had nowhere to live and had to
+be bolted on as a separate mode, which then needed its own valve,
+its own window and its own report. Those four switches were all
+descendants of one missing capability.
 
 Each turn, the `UserPromptSubmit` hook injects a block named
 "SOCRATIC CONTEXT" into the model's context. On turn close, the
@@ -75,241 +88,148 @@ state.
 
 
 ================================================================
-2. USER LEVELS (L1-L5)
+2. THE AXIS (L1-L5, plus the L6 off ramp)
 ================================================================
 
-Each level defines ONE canonical role and ONE protocol the model
-must follow. The protocol is injected as an imperative block at
-the end of the SOCRATIC CONTEXT, different depending on mode
-(learn vs productive). L5 injects no block — it is the "default
-Claude Code" mode.
+There is ONE pedagogical setting. It answers one question:
 
-Summary table:
+        HOW MUCH OF THE WORK IS THE USER'S?
 
-  | L | Role                 | Init hint | Accomp. | Block |
-  |---|----------------------|-----------|---------|-------|
-  | 1 | Live teacher         | 5         | 1.0     | HARD  |
-  | 2 | Teacher with context | 4         | 0.8     | soft  |
-  | 3 | Pair programmer      | 2         | 0.5     | soft  |
-  | 4 | Code reviewer        | 1         | 0.1     | soft  |
-  | 5 | Silent colleague     | 0         | 0.0     | -     |
+Everything else — how much the agent explains, which rungs it may
+use, what it hands over — is a consequence of the answer, not a
+second dial.
 
-`Init hint` is the `currentLevel` value the hint_state receives
-when the user is calibrated to this level, or when a fresh
-session starts. Reset to this value on level up/down.
+CONTRACT (data/levels.json; frozen in unificacion.txt section 12.B).
+If a rules file contradicts this table, the rules file is wrong.
 
-`Accompaniment ratio` is the proportion of code that should come
-with explanation. It is documented in the rule files but NOT
-measured or enforced today — it is a guideline for the model.
+  NIV  AUTHORSHIP                    FILES/DAY  STMT/FILE  RUNG   HANDOFF
+  ---  ----------------------------  ---------  ---------  -----  ----------
+  L1   implements completely            inf        inf      5     none
+  L2   structure + trivial bodies         8          8      4-5   module
+  L3   skeletons and signatures           6          0      3-4   unit
+  L4   nothing                            4          0      2-3   subproblem
+  L5   nothing                            3          0      0-1   none
+  L6   everything, no pedagogy          inf        inf      -     none
 
-The `HARD` and `soft` blocks are described below.
+  FILES/DAY  new files the agent may CREATE per UTC day
+  STMT/FILE  executable statements allowed in each created file
+  RUNG       range of ladder rungs; the rung moves inside it
+  HANDOFF    the unit of work handed to the user
 
+INVARIANTS no level may violate:
+  I1  Editing an EXISTING file: DENIED on L2-L5, no exception.
+      (allowed only on L1 and L6)
+  I2  The 80-line-per-file cap applies on L2-L5.
+  I3  Budget exhausted -> the gate denies and says the remaining
+      count. No override except `ship`.
+  I4  A DENIAL never consumes budget. Being told no is not a use.
+  I5  L6 disarms layers 1 and 2; layers 3 and 4 remain but report
+      "not applicable".
 
---- L1: LIVE TEACHER (Novice) ---
+WHY THE NUMBER GOES THIS WAY. Promotion takes work away from the
+agent and gives it to the user. Through v0.4 it was the opposite:
+L5 was a "silent colleague" that wrote your code without asking,
+so competence was rewarded with LESS practice. For a plugin whose
+purpose is fighting skill atrophy, that direction was training the
+disease.
 
-Canonical rules (`skills/socratic/rules/level-1-teacher.md`):
+WHY THE RUNG IS NOT FOLDED INTO THE LEVEL. Two different
+timescales. The LEVEL is a stable band that moves by calibration
+over days; the RUNG is the reaction inside a single problem, which
+climbs after two consecutive failures and comes back down over
+minutes. Folding them would mean getting stuck on one bug demotes
+you — exactly the noise the weighted calibration of Fase 12 was
+built to remove. The level bounds the range; the rung moves inside.
 
-  - MAX 30 lines of code per turn (counting blank lines and
-    comments).
-  - MAX 1 file touched per turn.
-  - DO NOT call Write/Edit/MultiEdit until the user has
-    explicitly approved the plan in THIS TURN. Past-turn approval
-    does not count — re-confirm.
-  - DO NOT advance to a new concept without verifying
-    comprehension of the previous one.
+ROLE PER LEVEL (see skills/socratic/rules/level-N-*.md):
 
-Mandatory 4-phase protocol before any code:
-  1. Restate: reformulate the user's request in your own words.
-  2. Plan: 3-6 bullets, each with file + line estimate.
-  3. Teach: explain the conceptual prerequisite with analogies.
-  4. Ask: ONE comprehension (not preference) question.
-     END turn. No tool calls.
+  L1 Implementer — the rescue level. The agent writes the code, but
+     every line has to teach: interleaved explanation, one real
+     comprehension question per block ("¿qué pasa si el email viene
+     con espacios?", never "¿se entiende?"). Writing silently is L6,
+     not L1.
 
-Verification question:
-  - GOOD: "why did we choose X over Y?", "if we swapped A for B,
-    what would break?", "explain it in your own words".
-  - BAD: "does that sound right?", "any questions?", "A or B?".
+  L2 Framer — the first level where the user's hands are on anything
+     that matters. The split is not "easy vs hard", it is
+     LOAD-BEARING vs NOT. A five-line function encoding the actual
+     domain rule is the user's; a thirty-line config object is the
+     agent's.
 
-User bypass ("just write it", "I already know this"): acknowledge
-in one line, proceed for that turn only, suggest
-`/socratic level 3`.
+  L3 Architect — the working level for a competent developer who
+     wants to stay one. Zero statement allowance is the definition
+     of the level, not a technicality: a file it creates holds
+     imports, types, signatures, comments and TODOs. Nothing that
+     runs.
 
-HARD block injected every turn (build-context.ts:348-358),
-independent of mode:
+  L4 Guide — writes nothing. The small file budget that survives is
+     TEDIUM RELIEF ONLY (an empty package.json, a blank component),
+     never structure that carries the design. Rung 2 is the
+     distinctive move: point at an analogous case ALREADY SOLVED in
+     the user's repo. The agent has Read/Grep; a supermarket-queue
+     analogy wastes that.
 
-  --- LEVEL 1 HARD LIMITS (critical, not optional) ---
-  DO NOT call Write / Edit / MultiEdit until the user has
-  explicitly approved the plan in THIS turn.
-  MAX 30 lines of code per response. MAX 1 file touched.
-  BEFORE any code, your response MUST contain (in order):
-    (1) restate, (2) plan (3-6 bullets + files + line counts),
-    (3) teach prerequisite concepts, (4) ONE comprehension
-        question. Then END THE TURN. No tool calls.
-  [+ examples of GOOD vs BAD verification questions]
-  [+ override handling]
+  L5 Socratic — the top. Questions only, orientation at most after
+     two failures. Does NOT decompose — that is a level-4 move and
+     the most common leak. When the user is genuinely stuck past
+     rung 1, the honest move is saying the problem sits above this
+     level and letting them drop to L4, not quietly coaching like an
+     L4 while calling it L5.
 
-
---- L2: TEACHER WITH CONTEXT (Basic) ---
-
-Canonical rules (`level-2-guide.md`):
-
-  - Explain the WHY behind every decision.
-  - Advance block-by-block, NOT line-by-line.
-  - Verify ONLY when introducing something new.
-  - Do not re-teach what the user has already used correctly
-    in this session.
-
-Soft block injected (build-context.ts):
-
-  LEARN:
-    - BEFORE introducing a non-trivial decision (library, pattern,
-      error handling, non-obvious syntax, data structure), state
-      the WHY in 1-2 sentences BEFORE the code.
-    - AFTER each block that introduces something new, ONE
-      comprehension question ("why X and not Y?", "what happens
-      if input is empty?"). Wait for the answer.
-    - Do NOT re-teach vocabulary the user has already used
-      correctly this session.
-    - Block-by-block, not line-by-line.
-
-  PRODUCTIVE (attenuated):
-    - Code directly; WHY in 1 sentence only if the decision is
-      non-obvious.
-    - Verify ONLY when the concept is new to this session.
-
-
---- L3: PAIR PROGRAMMER (Intermediate) ---
-
-Canonical rules (`level-3-pair.md`):
-
-  - BEFORE writing: "what approach do you have in mind?".
-  - If there are gaps in their approach, surface them as
-    QUESTIONS, not corrections.
-  - Use gapped code (`___`) at non-trivial spots — let the user
-    fill in and verify their reasoning.
-  - Do not explain basics — assume competence.
-
-Soft block:
-
-  LEARN:
-    - For non-trivial implementations (>5 lines or touching
-      logic): START with "what approach do you have in mind?".
-      Do NOT write code yet. Wait.
-    - Gaps -> questions, not corrections.
-    - Gapped code (`___`) in at least ONE non-trivial spot per
-      turn. Verify the answer before moving on.
-    - Trivial edits (rename, format, 1-line fix) are exempt —
-      implement directly.
-    - Do not explain basics.
-
-  PRODUCTIVE:
-    - Code directly. Challenge ONLY non-obvious or risky
-      decisions (data shape, error handling, concurrency,
-      security) as a brief question before committing.
-    - No "what approach do you have?" preamble. No gapped code.
-    - Do not explain basics.
-
-
---- L4: CODE REVIEWER (Advanced) ---
-
-Canonical rules (`level-4-reviewer.md`):
-
-  - Do NOT explain basics. Assume full competence.
-  - Question ARCHITECTURE: security, scalability,
-    maintainability, edge cases.
-  - Suggest alternatives as questions.
-  - Implicit challenge mode: look for weaknesses in every approach.
-
-Soft block:
-
-  LEARN:
-    - BEFORE accepting the user's proposal, raise at least ONE
-      concrete challenge as a question: edge case, security,
-      scalability, unmentioned alternative.
-    - Examples: "did you consider X?", "what happens if Y?",
-      "why not Z instead of W?".
-    - Skip ONLY if the task is genuinely trivial.
-    - Do not explain basics. Do not flatter.
-
-  PRODUCTIVE (heavily attenuated):
-    - Implement directly. Flag ONLY the critical: vulnerability,
-      serious bug, anti-pattern, significantly better
-      alternative — as one brief question ("Intentional?").
-    - Do not question minor stylistic choices.
-
-
---- L5: SILENT COLLEAGUE (Expert) ---
-
-Canonical rules (`level-5-silent.md`):
-
-  - Works as a normal code assistant.
-  - Does NOT ask pedagogical questions.
-  - Intervenes ONLY for: vulnerability, potential bug, serious
-    anti-pattern, or significantly better alternative.
-  - Brief interventions, ending with "Intentional?".
-
-NO block is injected in any mode — this is Claude Code's default
-behavior with an expert-mentor tone.
+  L6 Autopilot — see section 15.
 
 
 ================================================================
-3. MODES (LEARN / PRODUCTIVE)
+3. THE LADDER (0-5) — THE DIAL INSIDE THE LEVEL
 ================================================================
 
-Modes modulate HOW MUCH pedagogical friction the user accepts.
-They combine multiplicatively with the level:
+Modes (learn / productive) are GONE. `productive` said the same
+thing the level now says, and "I need to ship right now" became
+`ship`; `learn` was then the only remaining value of the field and
+said nothing the level did not.
 
-  LEARN: prioritizes teaching over speed. Pauses for
-         verification are frequent. The user wants to understand
-         every decision.
+The ladder is the same state machine it always was:
 
-  PRODUCTIVE: prioritizes speed over teaching. Pedagogical
-              interventions are opt-in (critical only). The user
-              wants output now.
+  - Escalation:        2 consecutive failures -> +1 rung
+  - Zero-knowledge:    "no sé" -> jump to the top rung the level allows
+  - De-escalation:     a correct answer drops it (5->3, 3+->1, 1+->0)
+  - Ceiling:           rung 5 is a WORK ORDER, never code
 
-Mode rules live in:
-  - skills/socratic/rules/mode-learn.md
-  - skills/socratic/rules/mode-productive.md
+What changed is what each rung MEANS, because above L1 "more help"
+can no longer mean "more code":
 
-Mode sensitivity is implemented as separate blocks in
-build-context.ts for L2, L3, and L4. L1 injects the same HARD
-block in both modes (L1 limits are non-negotiable). L5 never
-injects a block.
+  0  Pure socratic   Ask only. Nothing else.
+  1  Orientation     Name the area/file. Not what to do there.
+  2  Analogy         Point at a case already solved IN THEIR REPO.
+  3  Reduction       2-4 ordered subproblems. Do not solve the first.
+  4  Explanation     Prose, then make them restate it before typing.
+  5  Work order      Files, signatures, acceptance criteria, edge
+                     cases, order. STILL NOT CODE.
 
-Change mode: `/socratiskill:socratic mode learn` or
-`/socratiskill:socratic mode productive`.
+THE LITMUS TEST, applicable to all six rungs:
 
-Default on calibration: `learn`.
+    If the user could copy your response into their editor and get
+    working code, you failed — no matter which rung you were on.
 
+The single exception is L1, where the agent is supposed to write;
+there the ladder governs how much it EXPLAINS while writing.
 
 ================================================================
-4. HINT LADDER (0-5)
+4. LADDER MECHANICS (state machine)
 ================================================================
 
-Orthogonal to the user level. Defines how much scaffolding THIS
-turn's response carries.
+Section 3 defines what each rung MEANS. This one is the machine
+that moves it.
 
-Implementation in scripts/hint-state.ts + behavior description
-in skills/socratic/rules/hint-ladder.md.
+Implementation in scripts/hint-state.ts; the rung is then clamped
+into the level's allowed range by Axis.clampRung (axis-state.ts),
+so the level bounds the ladder and the ladder moves inside it.
+Behavior description in skills/socratic/rules/ladder.md.
 
-  | Hint | Strategy                                       |
-  |------|------------------------------------------------|
-  | 0    | Pure socratic (questions only, no hints)       |
-  | 1    | Orientation (point at the area, not solution)  |
-  | 2    | Analogy (real-world comparison)                |
-  | 3    | Reduction (shrink the problem to the minimum)  |
-  | 4    | Brief explanation + variation check            |
-  | 5    | Micro-lesson + immediate verification          |
+INITIAL RUNG per level (before clamping):
 
-INITIAL HINT per user level:
-
-  L1 -> 5     (Scaffolding)
-  L2 -> 4     (Explanation + verification)
-  L3 -> 2     (Analogy)
-  L4 -> 1     (Orientation)
-  L5 -> 0     (Pure socratic — but L5 injects no block, so this
-               initial value only matters if someone manually
-               adjusts the hint)
+  L1 -> 5     L2 -> 4     L3 -> 2 (clamped up to 3)
+  L4 -> 1 (clamped up to 2)       L5 -> 0
+  L6 -> no ladder; the axis is off
 
 AUTOMATIC ESCALATION (scripts/hint-state.ts:processResponse):
 
@@ -1062,260 +982,262 @@ Four states orthogonal to level/mode/hint:
 
 
 ================================================================
-15. IMMERSIVE MODE (v0.4) — THE THIRD AXIS
+15. THE AUTHORSHIP GATE (v0.5)
 ================================================================
 
-15.1 WHY THE OTHER AXES DO NOT SOLVE IT
+The only HARD enforcement in the plugin. Everything else is text
+injected into the context and obeyed at the model's discretion; this
+one is a PreToolUse hook that refuses the call outright.
 
-  Levels 1-5 and modes learn/productive vary ONE dimension: how
-  much the agent explains while it writes your code. In all ten
-  combinations the agent writes it. rules/mode-learn.md, at the
-  most pedagogical level that exists, literally reads "BEFORE
-  invoking Write, Edit, or MultiEdit..." — level 1 also writes
-  your code, it just warns you first.
+Why it cannot rest on obedience: a level-1 turn once wrote 378 lines
+despite explicit limits (cambios.txt, Tarea 10.A.2). "You do not
+write this" is not a rule a helpfulness gradient respects.
 
-  That optimizes passive comprehension. It does nothing for a
-  developer who understands everything the agent does and has
-  stopped producing code themselves. Recognition stays sharp
-  while recall decays, and the first masks the loss of the second
-  — which is why the decay goes unnoticed until there is no agent
-  available.
+15.1 THE MECHANISM
+------------------
+Claude Code lets a PreToolUse hook deny by printing
+{"hookSpecificOutput":{"hookEventName":"PreToolUse",
+  "permissionDecision":"deny","permissionDecisionReason":"<txt>"}}
+The tool never runs (verified: the canary file was never created —
+this is a denial, not a rollback) and the model receives <txt> clean.
 
-  Immersive mode is therefore not a level and not a mode value.
-  It is an orthogonal axis: WHO HOLDS THE KEYBOARD.
+Entry point: scripts/hook-pre-tool.sh -> scripts/gate-tool.ts
 
-    axis 1  level (1-5)             -> how much it explains
-    axis 2  mode (learn|productive) -> how much friction
-    axis 3  immersive               -> WHO WRITES THE CODE
+15.2 THE THREE LAYERS
+---------------------
+LAYER 1 — CREATE vs EDIT. The only authorship boundary drawable
+without anyone's opinion. "Is this boilerplate or the code that
+teaches them?" is a judgment, and a judgment handed to the model is
+one its helpfulness gradient widens until the exception swallows the
+feature. Whether a file already exists is a fact.
 
-  Scope: one session, optionally timeboxed. Deliberate training,
-  not a permanent setting — a global always-on mode gets switched
-  off the first Friday it collides with a deadline, and then the
-  whole thing dies.
+LAYER 2 — SHAPE (scripts/shape-check.ts). Closes the hole layer 1
+leaves: nothing stops the agent from creating a file that does not
+exist and putting the whole implementation inside it.
 
-  State: profile.immersive = { active, started_at,
-  expires_at|null, unlocks[], baseline_hint, git_baseline }.
-  Absent = normal mode, so every pre-v0.4 profile keeps working
-  untouched.
+  THE FRAMING THAT WORKS. Do not try to DETECT an implementation —
+  that is open-ended and semantic, and a model can out-invent any
+  blacklist. Assert the closed property instead: "this HAS THE SHAPE
+  OF A SKELETON".
 
-  Expiry is evaluated on every read rather than trusted from the
-  flag. A timebox that elapsed while the user was away must never
-  keep the gate shut — a lock the user cannot open is the worst
-  failure mode this feature has.
+  Every line is classified into exactly one of blank / comment /
+  structural / import / declaration / marker / STATEMENT, and
+  STATEMENT is the RESIDUAL category. Unknown syntax, an unlisted
+  language, a construct nobody anticipated: all of it lands in
+  STATEMENT and consumes allowance. The check FAILS CLOSED by
+  construction, not by enumeration.
 
-15.2 THE GATE (HARD ENFORCEMENT)
+  A statement line is worth one segment per top-level `;` (quote
+  aware), because counting one-per-line let a whole implementation
+  be packed onto a handful of lines under the 80-line cap.
 
-  hooks/hooks.json registers a PreToolUse hook. This is the only
-  hard enforcement in the whole plugin; everything else is text
-  the model may or may not obey.
+  Markup (.html/.json/.css/...) is judged by the line cap alone: it
+  has no bodies to leave empty, so a statement budget would deny
+  every honest scaffold. Everything unrecognized is treated as CODE,
+  which is the strict side.
 
-  Denied while immersive is active and no unlock is live:
-    - Write / Edit / MultiEdit / NotebookEdit
-    - Agent / Task (a subagent writing on your behalf is you
-      writing)
-    - Bash commands that write files: shell redirection, tee,
-      sed|perl|ruby -i, awk -i inplace, dd of=, truncate, patch,
-      git apply, and node/python inline writers.
+  KNOWN ROUGH EDGE: .sql sits in the code class. CREATE TABLE is
+  structure but a stored procedure IS the implementation.
 
-  Allowed on purpose: everything else in Bash. The user NEEDS to
-  run their own tests, git, builds and linters — a false positive
-  there makes the mode unusable, so the detector is deliberately
-  conservative and excludes /dev/null and file-descriptor
-  redirections (2>&1, >&2), which are plumbing, not authoring.
+LAYER 3 — DAILY BUDGET. Does not prevent, it bounds the blast
+radius: N new files per UTC day by level, 80 lines each. Replaces
+v0.4's user-granted scaffold window — the gate never needed the
+model's opinion, only a fact and a counter.
 
-  ALWAYS allowed: writes inside the socratic state dir. socratic
-  off, level N and challenge all mutate profile.json through the
-  Write tool, so gating that path would put the key inside the
-  locked room. The exemption compares on a separator boundary and
-  resolves .. segments, so neither a sibling directory with a
-  similar name nor a traversal can smuggle a write through it.
+LAYER 4 — LEDGER + VISIBILITY. Every file the gate allows is counted
+and SUBTRACTED from the autonomy report. Strong property: even if
+layers 1-3 are fooled, the METRIC stays honest, because those lines
+are attributed to the agent anyway. `status` shows the daily count,
+so the user is the last check — with a number, not with faith.
 
-  Denial format (validated empirically, Tarea I.0.1):
-    {"hookSpecificOutput":{"hookEventName":"PreToolUse",
-      "permissionDecision":"deny","permissionDecisionReason":".."}}
-  The tool never runs and the model receives the reason verbatim.
-  exit 2 + stderr also blocks, but wraps the message in
-  "PreToolUse:<Tool> hook error: [<command>]:" — fallback only.
+15.3 POLARITY WARNING (do not "harmonize")
+------------------------------------------
+Two detectors, opposite tunings, for a principled reason:
 
-  Cost: the hook fires on every Write/Edit/Bash of every session,
-  immersive or not. The off path is written in bash builtins only
-  ($(<file), substring test, no cat/grep) and costs ~98ms on Git
-  Bash for Windows, of which ~64ms is bash startup itself.
+  detectDisguisedWrite (gate-tool.ts)  PERMISSIVE — when in doubt,
+    ALLOW. A false positive blocks the USER from running their own
+    tests, which is the activity the whole axis exists to produce.
 
-  Fail-open everywhere: no profile, enabled=false, expired
-  timebox, live unlock, or any exception at all lets the call
-  through. A gate that misfires and blocks real work gets the
-  whole plugin uninstalled.
+  shape-check.ts                       RESTRICTIVE — when in doubt,
+    DENY. A false positive only blocks the AGENT, which retries with
+    a thinner file and loses a turn.
 
-15.3 THE IMMERSIVE LADDER
+The cost of an error is asymmetric in opposite directions. Both
+files carry this note at the point where someone would "fix" it.
 
-  The hint ladder (section 4) drives it unchanged: +1 rung after
-  2 consecutive failures, jump to 5 on a zero-knowledge signal,
-  jump-down on success. Only the MEANING of each rung changes,
-  because "more help" can no longer mean "more code".
+15.4 WHAT IS BLOCKED
+--------------------
+  Write to an existing file      denied (that is an edit)
+  Write to a new file            allowed if shape + budget + cap pass
+  Edit / MultiEdit / NotebookEdit denied (they only touch existing)
+  Agent / Task                   denied (a subagent writing is the
+                                 agent writing)
+  Bash                           inspected: `>` redirects, tee,
+                                 sed/perl/ruby -i, awk -i inplace,
+                                 dd of=, truncate, patch, git apply,
+                                 writeFileSync/createWriteStream/
+                                 open(...,'w') in inline node|python.
+                                 /dev/null, /dev/stderr and fd
+                                 redirections (2>&1, >&2) excluded —
+                                 that is plumbing, not authoring.
 
-    0  Pure socratic   ask only
-    1  Orientation     name the file/module, not what to do in it
-    2  Analogy         point at a case ALREADY SOLVED in their repo
-    3  Reduction       ordered subproblems, solve none of them
-    4  Explanation     prose + make them restate it before coding
-    5  Work order      files, signatures, acceptance criteria,
-                       edge cases, order. STILL NOT CODE.
+15.5 FAIL-OPEN PATHS
+--------------------
+A gate that blocks real work by mistake gets the plugin uninstalled,
+so every uncertain path allows the call:
 
-  Litmus test, applied to all six rungs: if the user could copy
-  the response into their editor and get working code, the turn
-  failed.
+  - no profile, unreadable profile, enabled=false
+  - level 1 (the agent is supposed to write)
+  - level 6 (the axis is off)
+  - an open `ship` escape
+  - any exception anywhere in the engine
 
-  Rung 5 is defined by its negative space too — no code blocks,
-  no line-by-line pseudocode, no function bodies, no complete
-  regex or SQL. That is where the pressure to hand over the
-  answer peaks, so it needed the explicit negative definition.
+THE LOCKED-ROOM EXEMPTION. Writes inside the state dir are always
+allowed, because `socratic off`, `level N` and `challenge` mutate
+profile.json through the Write tool — gating that path would let the
+axis block the very commands that change it. The comparison uses
+resolve() (so a ".." path cannot walk out) and a separator boundary
+(so ".../socratic-backup" is NOT exempted by prefix).
 
-  Rung 2 deviates from the normal ladder: instead of a generic
-  analogy it requires pointing at solved code in the user's own
-  repo. The agent has Read/Grep; a supermarket-queue analogy
-  wastes that and teaches nothing about navigating the codebase.
+15.6 COST
+---------
+The hook fires on EVERY Write/Edit/Bash of every session because it
+is registered in the manifest. The disarmed path is written in bash
+builtins only — no cat, no grep, no forks — and parses global_level
+with parameter expansion, arming only on 2-5.
 
-  While immersive is active the level and mode rule files do NOT
-  apply, and the injected rules line says so explicitly. The
-  level survives only as the rung the ladder starts on: a novice
-  opens near the work order, an expert opens with one question.
+  bare `bash -c 'exit 0'`   ~64ms   <- the floor, not ours
+  short-circuit (disarmed)  ~98ms
+  full gate (armed)        ~490ms   (dominated by the bun spawn)
 
-15.4 UNLOCK
+15.7 LEVEL 6 — THE OFF RAMP
+---------------------------
+Not the continuation of the axis: its APAGADO. From L1 to L5 the
+number is monotonic ("how much of the work is yours"); 6 jumps back
+past L1. Anything assuming monotonicity must branch on it rather
+than read it as "even more than 5".
 
-  /socratiskill:socratic unlock <reason> — 10 min by default,
-  unlock <N> <reason> for N. Reason is mandatory. Logged as
-  {at, reason, minutes} in immersive.unlocks[].
+  R6.1  Calibration CLAMPS AT 5 and can never promote here, by any
+        path (continuous, diagnostic gate, or `accept`). A plugin
+        fighting atrophy that promotes you to "I do everything"
+        sabotages itself. The only way in is typing `level 6`.
+  R6.2  Calibration does not run while here. There is no evidence to
+        gather about someone not being asked for anything.
+  R6.3  The gate is fully disarmed.
+  R6.4  The autonomy report says "not applicable", never "+0 lines".
+        A zero that means "not measured" is the dishonest datum the
+        report exists not to produce.
+  R6.5  `status` ALWAYS reports it by name, with what it implies and
+        where the real axis lives. Discouraging discovery is not the
+        same as hiding state from someone who already turned it on.
+  R6.6  No commentary on being here — same rule as the escape.
 
-  While live the gate stands down completely; it re-arms by
-  itself when the window elapses.
+Discretion, concretely: absent from argument-hint, README's
+subcommand table and QUICKSTART; present in this file, in
+data/levels.json, and in README's per-level protocol table. The
+validator accepts 6 without offering it; 7+ errors listing "1-5".
 
-  SKILL.md and rules/immersive.md both carry an explicit rule: do
-  NOT editorialize when the user unlocks. No "are you sure", no
-  reminder of their goals, no disappointment. Real work has real
-  deadlines; a lock with no exit is a lock that gets uninstalled.
-  The log is the accountability, not the model's commentary.
+RISK BEING WATCHED (RU-2): level 6 and `ship` overlap in intent.
+`ship` is temporary, demands a reason and is logged; level 6 is
+persistent, silent and leaves no trace in the metric. It could
+become a permanent escape that hollows the plugin out. The only
+available signal is time spent there, reported plainly in the
+journal under "days at level 6".
 
-  This is the same principle as the anti-adulation bundle from
-  v0.3, pointed the other way: flattery and scolding are both
-  failures to respect what the user decided.
+15.8 THE ESCAPE (`ship`)
+------------------------
+scripts/escape.ts. Deduplication of v0.4's `unlock` (temporary,
+reason required, logged) and `mode: productive` (persistent,
+silent) — both were asking "I need to ship right now" and only
+differed because they had been invented for different axes.
 
-15.5 AUTONOMY REPORT
+Reason REQUIRED (it is the whole accountability mechanism), expiry,
+log, self re-arming. Refused at L1 and L6 with an explicit message:
+there is nothing to escape from when the agent already writes.
 
-  Printed on immersive off AND on timebox expiry (ending by the
-  clock is the common case and must not be the silent one), then
-  archived to sessions/<date>.json under immersive_summaries[].
-  build-journal.ts aggregates it under "## Autonomy".
+NEVER EDITORIALIZED. No "are you sure", no reminder about goals, no
+disappointment. Real work has real deadlines, and a lock with no
+exit gets uninstalled the first Friday it gets in the way. Flattery
+and scolding are the same error of not respecting the decision.
 
-  HARD SIGNAL: git. With the gate closed the agent cannot write,
-  so whatever appeared in the working tree came from the user.
+15.9 THE HANDOFF (L2-L4)
+------------------------
+skills/socratic/rules/handoff.md.
 
-    lines = diff(baseline_head..HEAD)  committed in the session
-          + diff(HEAD)                 currently uncommitted
-          - baseline.worktree          what was already dirty
+  frame -> name the unit -> acceptance criteria -> STOP
+        -> evaluate -> close -> next
 
-  The naive "diff now minus diff then" goes NEGATIVE the moment
-  the user commits, because committing moves HEAD and resets the
-  working-tree diff — precisely when they were most productive.
+Criteria are stated BEFORE any code exists; that is what makes the
+review objective instead of a matter of taste. State carried in the
+session file (NOT the profile: an abandoned unit must not follow the
+user into tomorrow, same reasoning as FeynmanState), opened and
+closed via HINT_META.handoff, re-announced by the hook every turn.
 
-  worktreeStat cuenta ademas los archivos NO TRACKEADOS (git
-  ls-files --others --exclude-standard). git diff HEAD solo ve lo
-  trackeado, y en este modo crear archivos nuevos es el caso comun:
-  sin eso, el trabajo que el modo existe para producir se contaba
-  como cero. Bug real encontrado en el primer uso, no por los tests.
+A second `open` does NOT displace the first: one unit at a time, and
+the first is what the user is still working on. A malformed handoff
+degrades to "nothing changed hands" and never costs the turn record.
 
-  Soft signals alongside it: average ladder rung, turns with
-  user_wrote=true over total, unlock count and reasons.
+EVALUATION, the half that decays silently into "looks good":
+  order      criteria (by name) -> correctness -> safety -> the rest
+             is a footnote
+  how        point at the LINE, name the problem, ask what they would
+             do. Never produce the corrected version — that is Write
+             with extra steps, and the gate does not stop prose.
+  praise     specific or nothing. "Buen trabajo" teaches that your
+             approval carries no information.
+  failures   SOFTENING (a real problem stated as a suggestion is one
+             that will not be fixed) and REWRITING IN PROSE (enough
+             detail to transcribe is the same failure as pasting).
+  a failed unit is HANDED BACK, not fixed. It is the most valuable
+  turn in the loop: the only moment the user finds their own gap
+  while it is still warm.
 
-  HONESTY: during an unlock the agent CAN write, and those lines
-  land in the same working tree. There is no cheap way to
-  attribute them, so the report SAYS SO instead of implying a
-  clean number.
+15.10 AUTONOMY MEASUREMENT
+--------------------------
+scripts/autonomy-report.ts. Git is the honest signal, not model
+self-report: with the gate armed, what appears in the working tree
+came from the user's hands.
 
-  No gamification: no badges, no goals, no streak celebration,
-  and an explicit instruction to the model not to soften a low
-  count. Trend is read by comparing two journals; a composite
-  score would be a number this plugin invented rather than
-  measured.
+FORMULA, and why not the obvious one: committing mid-session moves
+HEAD and resets the working-tree diff, so "diff now minus diff then"
+goes NEGATIVE exactly when the user was most productive.
 
-15.6 DRILLS
+    lines = diff(baseline_head..HEAD)   (committed)
+          + diff(HEAD)                  (pending now)
+          + untracked lines             (git diff HEAD cannot see them)
+          - baseline.worktree           (what was already dirty)
 
-  drill analyze [<file>] — the user is quizzed on existing code.
-  Works with or without immersive mode; reading was never the
-  restricted thing, and analysis is half of what the user fears
-  losing.
+BASELINES ARE PER REPOSITORY, ROLLING DAILY. This fixes the v0.4 bug
+where the baseline was pinned to whatever directory immersive mode
+happened to be switched on in: the user moved to another project and
+the report measured the tree they had left. The axis has no
+activation to hang a baseline on — it is a persistent level — so the
+UserPromptSubmit hook, which receives `cwd` every turn, refreshes the
+baseline for wherever the user actually is.
 
-  Selection is DETERMINISTIC and belongs to the script, not the
-  model: asked to pick a file for a quiz, a model reliably picks
-  something short and convenient, and the user cannot steer it
-  either. Heuristic: git-tracked source files, 25-500 lines,
-  excluding node_modules/dist/build/vendor/migrations and
-  generated or lock files, rotating over the last 10 drills.
+TWO HONESTY RULES:
+  - Lines the agent wrote by CREATING a file are subtracted exactly
+    (the gate saw every one).
+  - Lines it wrote during a `ship` window cannot be told apart from
+    the user's in the same tree, so the report SAYS SO rather than
+    implying a clean number.
 
-  Protocol: read the whole file, then ONE question per turn,
-  escalating from "what does it do" to "what breaks if I remove
-  this". The last two question types are the ones that matter —
-  "what does it do" is recognition. Wrong answers become Leitner
-  cards under a stable topic slug, and the existing spaced-
-  repetition machinery does the rest with no new code.
+No gamification: no badges, no goals, no streaks, and an explicit
+instruction not to editorialize or soften a low count. The honest
+number is the product — same reason the calibration grader defaults
+to fail.
 
-  drill build — the user implements a bounded task from a blank
-  page. REQUIRES immersive mode: a build drill with the agent
-  free to write is not a drill. Captures a git baseline and
-  reports lines written on drill done.
-
-  Acceptance criteria must be agreed BEFORE any code exists.
-  That is what makes the closing review objective instead of a
-  matter of taste.
-
-  Both: never do the exercise for them, silence is allowed, and a
-  failed drill is a successful measurement — it found something
-  they had lost.
-
-15.7 SCAFFOLD WINDOW (v0.4.1)
-
-  PROBLEMA: tipear el esqueleto (index.html vacio, package.json,
-  tsconfig) no entrena nada y quema los minutos mas caros de una
-  sesion en lo que menos vale. Es el RI-1 (adopcion) materializado.
-
-  LA TRAMPA EVITADA: que el nivel module QUE puede escribir el
-  agente, o una regla blanda tipo "si te lo pide explicitamente,
-  crea la estructura". Ambas delegan en el MODELO la frontera entre
-  boilerplate y codigo formativo. Esa frontera no es definible en
-  codigo y el gradiente del modelo la ensancha hasta tragarse la
-  feature (Tarea 10.A.2: nivel 1 escribio 378 lineas pese a limites).
-
-  REGLA: el modelo PROPONE, solo el usuario CONCEDE. La ventana la
-  abre un comando; una frase en prosa no.
-
-  LA LINEA ENFORZABLE: crear vs editar. Que un archivo exista es un
-  HECHO que el gate verifica; "esto es lo bastante aburrido" es un
-  juicio. Con la ventana abierta:
-    Write a archivo inexistente  -> permitido (dentro del tope)
-    Write a archivo existente    -> denegado (es un Edit)
-    Edit / MultiEdit             -> denegado siempre
-    Bash-write / subagentes      -> denegado siempre
-
-  TOPES (data/algorithm.json): archivos por nivel L1:2 ... L5:12,
-  80 lineas por archivo (plano), ventana de 20 min. Cierra por lo
-  primero que ocurra: cupo, tiempo, o fin de la sesion.
-  El nivel escala el TAMANO, nunca la categoria — a un novato tipear
-  boilerplate si le construye fluidez.
-
-  CONTABILIDAD: el gate deja de ser solo-lectura. Cuenta al PERMITIR,
-  no al completar (sobrecuenta si la escritura falla despues; el
-  error corre contra el usuario, no a favor). Usa el lock de
-  profile.json y es best-effort: nunca bloquea una escritura
-  permitida por no poder actualizar un contador.
-
-  GANANCIA SOBRE EL UNLOCK: con unlock las lineas del agente son
-  indistinguibles de las del usuario en el mismo working tree y el
-  reporte solo puede confesar la contaminacion. Con scaffold el gate
-  vio cada archivo que permitio, asi que la resta es exacta.
-
-  scaffolds[] se guarda APARTE de unlocks[]: scaffolding es parte
-  legitima del flujo, rendirse no, y un solo contador no puede
-  significar las dos cosas sin volverse inutil.
+15.11 HONEST LIMITS
+-------------------
+  - The gate blocks tool calls, not TEXT. Nothing stops the model
+    pasting code into the chat; only the rules forbid it.
+  - Nothing stops the user opening a second Claude Code window
+    without the plugin. Voluntary training; not policed.
+  - The shape check is line-based and no substitute for reading the
+    diff. It makes smuggling expensive, not impossible.
+  - The axis says nothing about code QUALITY. Writing bad code
+    unassisted still trains the muscle.
+  - The line count is repo-wide, not feature-scoped.
 
 ================================================================
 APPENDIX — RECENT CHANGES

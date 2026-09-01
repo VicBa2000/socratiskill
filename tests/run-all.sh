@@ -9,7 +9,7 @@
 #
 # Usage:
 #   bash tests/run-all.sh                 # run everything
-#   bash tests/run-all.sh --only <N>      # run only scenario N (1..18)
+#   bash tests/run-all.sh --only <N>      # run only scenario N (1..34; 24 retired into 19/25/32)
 #   bash tests/run-all.sh --list          # list scenarios
 #   bash tests/run-all.sh --stop-on-fail  # abort on first FAIL
 #
@@ -95,6 +95,21 @@ EOF
 }
 
 teardown_state() { rm -rf "$1" 2>/dev/null || true; }
+
+# Set the axis level on an existing state dir. The level is the single
+# pedagogical setting, so most scenarios move it rather than flipping a
+# separate mode switch.
+set_level() {
+  node -e '
+    const fs=require("fs"); const p=process.argv[1];
+    const d=JSON.parse(fs.readFileSync(p,"utf-8"));
+    d.global_level = Number(process.argv[2]);
+    d.enabled = true;
+    d.schema_version = 2;
+    delete d.mode;
+    fs.writeFileSync(p, JSON.stringify(d, null, 2));
+  ' "$1/profile.json" "$2"
+}
 
 # Session files are named by UTC date (the scripts use toISOString), so
 # assertions must resolve the path with `date -u`. Using local time here
@@ -490,71 +505,69 @@ if should_run 20; then
   teardown_state "$tmp"
 fi
 
-## S19 per-level protocol blocks (L1 hard-limits, L2/L3/L4 protocols, L5 silent)
+## S19 per-level protocol blocks (one axis, no mode)
 if should_run 19; then
-  header "S19 per-level protocol blocks (mode-sensitive)"
+  header "S19 per-level protocol blocks"
 
-  set_profile() {
-    # $1=tmp $2=level $3=mode
-    node -e 'const fs=require("fs"); const p=process.argv[1]+"/profile.json"; const d=JSON.parse(fs.readFileSync(p,"utf-8")); d.global_level=Number(process.argv[2]); d.mode=process.argv[3]; fs.writeFileSync(p,JSON.stringify(d,null,2))' "$1" "$2" "$3"
-  }
+  # The block is chosen by LEVEL and nothing else. There is no mode to
+  # cross it with any more: "who writes the code" IS the level, so the
+  # ten level x mode combinations collapsed into six.
 
-  # 19a — at level 1 (learn), HARD LIMITS block is present
-  tmp=$(setup_state 19a); set_profile "$tmp" 1 learn
+  # 19a — L1 keeps the hard limits. It is the only level on the axis
+  # where the agent authors, so it is the only one that needs a leash on
+  # HOW it authors.
+  tmp=$(setup_state 19a); set_level "$tmp" 1
   OUT=$(fire_pre "$tmp" "implementame algo")
   echo "$OUT" | grep -q "LEVEL 1 HARD LIMITS" && pass "L1: HARD LIMITS block injected" || fail "S19a missing HARD LIMITS at level 1"
-  echo "$OUT" | grep -q "DO NOT call Write" && pass "L1: block reminds about Write/Edit gate" || fail "S19a2 missing Write gate reminder"
+  echo "$OUT" | grep -q "DO NOT call Write" && pass "L1: block reminds about the approval gate" || fail "S19a2 missing Write gate reminder"
+  echo "$OUT" | grep -q "every line has to teach" && pass "L1 is distinguished from level 6" || fail "S19a3 L1 not distinguished from autopilot"
   teardown_state "$tmp"
 
-  # 19b — at level 2 (learn), L2 protocol present (learn flavor) + no L1 leak
-  tmp=$(setup_state 19b); set_profile "$tmp" 2 learn
-  OUT=$(fire_pre "$tmp" "dame una funcion que valide emails")
-  echo "$OUT" | grep -q "LEVEL 2 PROTOCOL (learn" && pass "L2 learn: protocol block injected" || fail "S19b missing L2 learn block"
-  echo "$OUT" | grep -q "state the WHY" && pass "L2 learn: requires WHY before non-trivial decisions" || fail "S19b2 L2 learn missing WHY rule"
-  echo "$OUT" | grep -q "LEVEL 1 HARD LIMITS" && fail "S19b3 L1 block leaked into L2" || pass "L2: no L1 block leak"
+  # 19b-d — L2/L3/L4 share the authorship core and differ in what they
+  # may put in a file and what unit they hand over.
+  for lvl in 2 3 4; do
+    tmp=$(setup_state "19-l$lvl"); set_level "$tmp" "$lvl"
+    OUT=$(fire_pre "$tmp" "dame una funcion que valide emails")
+    echo "$OUT" | grep -q "LEVEL $lvl PROTOCOL" && pass "L$lvl: protocol block injected" || fail "S19b L$lvl protocol block missing"
+    echo "$OUT" | grep -q "DO NOT edit files that already exist" && pass "L$lvl: edit prohibition stated" || fail "S19b L$lvl missing edit prohibition"
+    echo "$OUT" | grep -q "DO NOT paste code blocks" && pass "L$lvl: paste prohibition stated" || fail "S19b L$lvl missing paste prohibition"
+    echo "$OUT" | grep -q "LEVEL 1 HARD LIMITS" && fail "S19b L1 block leaked into L$lvl" || pass "L$lvl: no L1 leak"
+    teardown_state "$tmp"
+  done
+
+  # 19e — the levels differ where the contract says they differ.
+  tmp=$(setup_state 19e); set_level "$tmp" 2
+  fire_pre "$tmp" "x" | grep -q "at most 8 executable statements" && pass "L2 may write trivial bodies" || fail "S19e L2 allowance wrong"
+  set_level "$tmp" 3
+  fire_pre "$tmp" "x" | grep -q "ZERO executable statements" && pass "L3 may write no bodies at all" || fail "S19e L3 allowance wrong"
   teardown_state "$tmp"
 
-  # 19c — at level 2 (productive), shorter L2 productive block
-  tmp=$(setup_state 19c); set_profile "$tmp" 2 productive
-  OUT=$(fire_pre "$tmp" "dame una funcion que valide emails")
-  echo "$OUT" | grep -q "LEVEL 2 PROTOCOL (productive" && pass "L2 productive: protocol block injected" || fail "S19c missing L2 productive block"
-  echo "$OUT" | grep -q "LEVEL 2 PROTOCOL (learn" && fail "S19c2 L2 learn flavor leaked into productive" || pass "L2 productive: no learn-flavor leak"
+  # 19f — L5 gets the authorship core but no direction: decomposing is a
+  # lower-level move, and offering it here is the most common leak.
+  tmp=$(setup_state 19f); set_level "$tmp" 5
+  OUT=$(fire_pre "$tmp" "implementame algo")
+  echo "$OUT" | grep -q "LEVEL 5 PROTOCOL" && pass "L5: protocol block injected" || fail "S19f L5 block missing"
+  echo "$OUT" | grep -q "You do NOT direct the work" && pass "L5: forbidden from decomposing" || fail "S19f L5 direction not forbidden"
   teardown_state "$tmp"
 
-  # 19d — at level 3 (learn), L3 learn protocol + gapped code + "¿Qué enfoque"
-  tmp=$(setup_state 19d); set_profile "$tmp" 3 learn
-  OUT=$(fire_pre "$tmp" "implementame algo no trivial")
-  echo "$OUT" | grep -q "LEVEL 3 PROTOCOL (learn" && pass "L3 learn: protocol block injected" || fail "S19d missing L3 learn block"
-  echo "$OUT" | grep -q "¿Qué enfoque" && pass "L3 learn: asks for approach first" || fail "S19d2 L3 learn missing approach question"
-  echo "$OUT" | grep -q "gapped code" && pass "L3 learn: requires gapped code" || fail "S19d3 L3 learn missing gapped code"
-  echo "$OUT" | grep -q "LEVEL 1 HARD LIMITS" && fail "S19d4 L1 block leaked into L3" || pass "L3: no L1 block leak"
+  # 19g — L6 is the axis switched off. Any pedagogical instruction here
+  # would contradict what the user asked for by typing `level 6`.
+  tmp=$(setup_state 19g); set_level "$tmp" 6
+  OUT=$(fire_pre "$tmp" "implementame algo")
+  echo "$OUT" | grep -q "LEVEL 6 (axis off)" && pass "L6: axis-off block injected" || fail "S19g L6 block missing"
+  echo "$OUT" | grep -q "DO NOT edit files that already exist" && fail "S19g authorship prohibition leaked into L6" || pass "L6: no authorship prohibition"
+  echo "$OUT" | grep -q "Do NOT comment on the fact that the user is at level 6" && pass "L6: no commentary about being there" || fail "S19g L6 missing the no-commentary rule"
+  echo "$OUT" | grep -q "HINT_META" && pass "L6 still reports telemetry" || fail "S19g L6 lost telemetry"
   teardown_state "$tmp"
 
-  # 19e — at level 3 (productive), direct implementation, no gapped code
-  tmp=$(setup_state 19e); set_profile "$tmp" 3 productive
-  OUT=$(fire_pre "$tmp" "implementame algo no trivial")
-  echo "$OUT" | grep -q "LEVEL 3 PROTOCOL (productive" && pass "L3 productive: protocol block injected" || fail "S19e missing L3 productive block"
-  echo "$OUT" | grep -q "No gapped code" && pass "L3 productive: explicitly no gapped code" || fail "S19e2 L3 productive should disable gapped code"
-  teardown_state "$tmp"
-
-  # 19f — at level 4 (learn), challenge-as-question required
-  tmp=$(setup_state 19f); set_profile "$tmp" 4 learn
-  OUT=$(fire_pre "$tmp" "aqui esta mi propuesta de arquitectura")
-  echo "$OUT" | grep -q "LEVEL 4 PROTOCOL (learn" && pass "L4 learn: protocol block injected" || fail "S19f missing L4 learn block"
-  echo "$OUT" | grep -q "at least ONE concrete challenge" && pass "L4 learn: requires at least one challenge" || fail "S19f2 L4 learn missing challenge rule"
-  teardown_state "$tmp"
-
-  # 19g — at level 4 (productive), terse, critical-only
-  tmp=$(setup_state 19g); set_profile "$tmp" 4 productive
-  OUT=$(fire_pre "$tmp" "implementa esto")
-  echo "$OUT" | grep -q "LEVEL 4 PROTOCOL (productive" && pass "L4 productive: protocol block injected" || fail "S19g missing L4 productive block"
-  echo "$OUT" | grep -q "Flag ONLY the critical" && pass "L4 productive: critical-only flagging" || fail "S19g2 L4 productive missing critical-only rule"
-  teardown_state "$tmp"
-
-  # 19h — at level 5, NO protocol block (silent colleague)
-  tmp=$(setup_state 19h); set_profile "$tmp" 5 learn
-  OUT=$(fire_pre "$tmp" "implementa esto")
-  echo "$OUT" | grep -qE "LEVEL [1-5] (HARD LIMITS|PROTOCOL)" && fail "S19h L5 unexpectedly got a protocol block" || pass "L5: no protocol block (silent colleague)"
+  # 19h — an open escape overrides the level block entirely, and forbids
+  # commentary about it. Flattery and scolding are the same error.
+  tmp=$(setup_state 19h); set_level "$tmp" 3
+  SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/escape.ts" --reason "prod" --minutes 10 >/dev/null 2>&1
+  OUT=$(fire_pre "$tmp" "escribime esto")
+  echo "$OUT" | grep -q "ESCAPE OPEN" && pass "escape block injected" || fail "S19h escape block missing"
+  echo "$OUT" | grep -q "LEVEL 3 PROTOCOL" && fail "S19h level protocol leaked during escape" || pass "escape replaces the level protocol"
+  echo "$OUT" | grep -q -i "do NOT moralize" && pass "escape forbids moralizing" || fail "S19h moralizing not forbidden"
   teardown_state "$tmp"
 fi
 
@@ -745,104 +758,34 @@ if should_run 23; then
   teardown_state "$tmp"
 fi
 
-## S24 immersive mode: activation, context block, timebox expiry, idempotency
-if should_run 24; then
-  header "S24 immersive mode (third axis: who holds the keyboard)"
-
-  # 24a — activation writes the state with a timebox.
-  tmp=$(setup_state 24a)
-  SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/immersive.ts" --on --minutes 60 >/dev/null 2>&1
-  OK=$(node -e '
-    const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8"));
-    const i=d.immersive;
-    if(!i||i.active!==true||!i.expires_at){process.stdout.write("no");process.exit(0)}
-    const left=(Date.parse(i.expires_at)-Date.now())/60000;
-    process.stdout.write(left>55&&left<=60?"yes":"no");
-  ' "$tmp/profile.json")
-  [[ "$OK" == "yes" ]] && pass "immersive on --minutes 60 sets active state with timebox" || fail "S24a activation state wrong"
-
-  # 24b — the context block replaces the per-level protocol. Level 3 would
-  # normally emit "LEVEL 3 PROTOCOL"; in immersive it must not, because every
-  # level protocol is a rule about how the agent writes code.
-  OUT=$(fire_pre "$tmp" "agrega validacion al login")
-  echo "$OUT" | grep -q "IMMERSIVE MODE" && pass "immersive block injected" || fail "S24b IMMERSIVE MODE block missing"
-  echo "$OUT" | grep -q "LEVEL 3 PROTOCOL" && fail "S24b level protocol leaked into immersive mode" || pass "level protocol suppressed while immersive"
-  echo "$OUT" | grep -q "^immersive: ON" && pass "header reports immersive state" || fail "S24b header line missing"
-
-  # 24c — the rung comes from the hint ladder (level 3 starts at rung 2).
-  echo "$OUT" | grep -q "CURRENT RUNG: 2 (Analogy)" && pass "rung derived from hint state (L3 -> rung 2)" || fail "S24c wrong rung"
-  echo "$OUT" | grep -q "DO NOT paste code blocks" && pass "no-code-blocks rule present (the copy-paste loophole)" || fail "S24c missing no-code-block rule"
-  teardown_state "$tmp"
-
-  # 24d — an elapsed timebox must end the mode by itself, clear the state, and
-  # tell the user once. A stale lock the user cannot open is the worst
-  # failure mode this feature has.
-  tmp=$(setup_state 24d)
-  SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/immersive.ts" --on --minutes 30 >/dev/null 2>&1
-  node -e '
-    const fs=require("fs"),p=process.argv[1]+"/profile.json";
-    const d=JSON.parse(fs.readFileSync(p,"utf-8"));
-    d.immersive.expires_at=new Date(Date.now()-60000).toISOString();
-    fs.writeFileSync(p,JSON.stringify(d,null,2));
-  ' "$tmp"
-  OUT=$(fire_pre "$tmp" "seguimos")
-  echo "$OUT" | grep -q "IMMERSIVE MODE" && fail "S24d expired timebox still enforcing" || pass "expired timebox stops enforcing"
-  echo "$OUT" | grep -q "timebox elapsed" && pass "user is told the session ended" || fail "S24d no elapsed notice"
-  echo "$OUT" | grep -q "LEVEL 3 PROTOCOL" && pass "level protocol returns after expiry" || fail "S24d level protocol did not return"
-  GONE=$(node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")); process.stdout.write("immersive" in d?"no":"yes")' "$tmp/profile.json")
-  [[ "$GONE" == "yes" ]] && pass "expired state cleared from profile" || fail "S24d stale immersive key left in profile"
-  teardown_state "$tmp"
-
-  # 24e — off prints a summary and removes the key; idempotent on both sides.
-  tmp=$(setup_state 24e)
-  SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/immersive.ts" --on >/dev/null 2>&1
-  AGAIN=$(SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/immersive.ts" --on 2>&1)
-  echo "$AGAIN" | grep -q "already active" && pass "immersive on is idempotent" || fail "S24e double activation not detected"
-  # Since S27 the summary is the autonomy report, not a bare line count.
-  OFF=$(SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/immersive.ts" --off 2>&1)
-  echo "$OFF" | grep -q "immersive session ended" && pass "off prints the autonomy report" || fail "S24e off summary missing"
-  echo "$OFF" | grep -q "duration:" && pass "off reports session duration" || fail "S24e duration missing"
-  OFF2=$(SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/immersive.ts" --off 2>&1)
-  echo "$OFF2" | grep -q "already off" && pass "immersive off is idempotent" || fail "S24e double off not detected"
-
-  # 24f — with the mode off, nothing immersive may leak into the context.
-  OUT=$(fire_pre "$tmp" "hola")
-  echo "$OUT" | grep -q "IMMERSIVE" && fail "S24f immersive leaked while off" || pass "no immersive leak when off"
-  teardown_state "$tmp"
-
-  # 24g — guards: bad arguments and paused profile.
-  tmp=$(setup_state 24g)
-  SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/immersive.ts" --on --minutes -5 >/dev/null 2>&1
-  [[ "$?" == "2" ]] && pass "negative timebox rejected (exit 2)" || fail "S24g negative minutes not rejected"
-  mv "$tmp/profile.json" "$tmp/profile.json.paused"
-  SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/immersive.ts" --status >/dev/null 2>&1
-  [[ "$?" == "3" ]] && pass "refuses while paused (exit 3)" || fail "S24g paused profile not detected"
-  teardown_state "$tmp"
-fi
-
-## S25 immersive gate: PreToolUse lockout, bash discrimination, unlock
+## S25 the gate reads the axis: authorship lockout by level
 if should_run 25; then
-  header "S25 immersive gate (PreToolUse lockout + unlock)"
+  header "S25 gate by level (PreToolUse lockout + escape)"
 
-  # 25a — mode off: the gate must be invisible. This is the path every
-  # user of the plugin pays on every single tool call, immersive or not.
+  # 25a — L1: the agent is SUPPOSED to write. The gate must be invisible,
+  # and this is the path every user pays on every tool call.
   tmp=$(setup_state 25a)
-  [[ "$(gate_verdict "$tmp" Write)" == "allow" ]] && pass "gate allows Write when immersive is off" || fail "S25a gate blocked with mode off"
-  [[ "$(gate_verdict "$tmp" Bash "echo hola > f.txt")" == "allow" ]] && pass "gate ignores bash writes when immersive is off" || fail "S25a gate blocked bash with mode off"
+  set_level "$tmp" 1
+  [[ "$(gate_verdict "$tmp" Write)" == "allow" ]] && pass "gate allows Write at L1" || fail "S25a gate blocked Write at L1"
+  [[ "$(gate_verdict "$tmp" Bash "echo hola > f.txt")" == "allow" ]] && pass "gate ignores bash writes at L1" || fail "S25a gate blocked bash at L1"
 
-  # 25b — mode on: every code-writing tool is denied.
-  SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/immersive.ts" --on --minutes 60 >/dev/null 2>&1
-  for t in Write Edit MultiEdit NotebookEdit; do
-    [[ "$(gate_verdict "$tmp" "$t")" == "deny" ]] && pass "denies $t while immersive" || fail "S25b $t not denied"
+  # 25b — L3: every tool that changes existing code is denied.
+  set_level "$tmp" 3
+  for t in Edit MultiEdit NotebookEdit; do
+    [[ "$(gate_verdict "$tmp" "$t")" == "deny" ]] && pass "denies $t at L3" || fail "S25b $t not denied"
   done
+  # Write of a file that does not exist is judged by SHAPE, not blocked
+  # outright: "x" is one executable statement and L3 allows zero.
+  [[ "$(gate_verdict "$tmp" Write)" == "deny" ]] && pass "denies a Write carrying statements at L3" || fail "S25b statement Write not denied"
 
   # 25c — the delegation loophole: a subagent writing on the agent's behalf
   # is the agent writing.
   [[ "$(gate_verdict "$tmp" Agent)" == "deny" ]] && pass "denies subagent delegation" || fail "S25c Agent not denied"
   [[ "$(gate_verdict "$tmp" Task)" == "deny" ]] && pass "denies Task delegation" || fail "S25c Task not denied"
 
-  # 25d — bash must stay usable for real work. False positives here make the
-  # mode unusable: the user needs their own tests, git and builds.
+  # 25d — bash must stay usable for real work. False positives here make
+  # the axis unusable: the user needs their own tests, git and builds, and
+  # running them is exactly the activity the axis exists to produce.
   for c in "bun test" "npm test 2>&1" "git status --short" "ls -la > /dev/null" "grep -rn foo src/"; do
     [[ "$(gate_verdict "$tmp" Bash "$c")" == "allow" ]] && pass "bash allowed: $c" || fail "S25d false positive on: $c"
   done
@@ -855,101 +798,98 @@ if should_run 25; then
   [[ "$(gate_verdict "$tmp" Bash "git apply fix.patch")" == "deny" ]] && pass "bash deny: git apply" || fail "S25e git apply not caught"
   teardown_state "$tmp"
 
-  # 25f — unlock guards.
+  # 25f — escape guards. The reason IS the accountability mechanism; an
+  # escape with no record is how the autonomy number stops meaning
+  # anything.
   tmp=$(setup_state 25f)
-  SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/immersive.ts" --unlock --reason "x" >/dev/null 2>&1
-  [[ "$?" == "2" ]] && pass "unlock refused when immersive is not active" || fail "S25f unlock allowed while off"
-  SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/immersive.ts" --on --minutes 60 >/dev/null 2>&1
-  SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/immersive.ts" --unlock >/dev/null 2>&1
-  [[ "$?" == "2" ]] && pass "unlock requires a reason" || fail "S25f reasonless unlock accepted"
-
-  # 25g — a live unlock stands the gate down completely, and is logged.
-  SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/immersive.ts" --unlock --reason "prod hotfix" --minutes 5 >/dev/null 2>&1
-  [[ "$(gate_verdict "$tmp" Write)" == "allow" ]] && pass "unlock lets the agent write again" || fail "S25g gate still blocking during unlock"
-  LOGGED=$(node -e '
-    const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8"));
-    const u=d.immersive.unlocks;
-    process.stdout.write(u.length===1 && u[0].reason==="prod hotfix" && u[0].minutes===5 ? "yes":"no");
-  ' "$tmp/profile.json")
-  [[ "$LOGGED" == "yes" ]] && pass "unlock is logged with reason and duration" || fail "S25g unlock not logged properly"
-
-  # 25h — when the unlock elapses the gate closes again by itself.
-  node -e '
-    const fs=require("fs"),p=process.argv[1]+"/profile.json";
-    const d=JSON.parse(fs.readFileSync(p,"utf-8"));
-    d.immersive.unlocks[0].at=new Date(Date.now()-10*60000).toISOString();
-    fs.writeFileSync(p,JSON.stringify(d,null,2));
-  ' "$tmp"
-  [[ "$(gate_verdict "$tmp" Write)" == "deny" ]] && pass "gate re-locks when the unlock elapses" || fail "S25h expired unlock still open"
+  set_level "$tmp" 3
+  SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/escape.ts" >/dev/null 2>&1 \
+    && fail "S25f escape accepted without a reason" || pass "escape requires a reason"
+  set_level "$tmp" 1
+  SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/escape.ts" "x" >/dev/null 2>&1 \
+    && fail "S25f escape accepted at L1" || pass "escape refused at L1 (nothing to escape)"
+  set_level "$tmp" 6
+  SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/escape.ts" "x" >/dev/null 2>&1 \
+    && fail "S25f escape accepted at L6" || pass "escape refused at L6 (axis already off)"
   teardown_state "$tmp"
 
-  # 25j — the gate must never lock the user out of its own controls.
-  # `socratic off`, `level N` and `challenge` all mutate profile.json via
-  # the Write tool; gating that path would put the key inside the locked
-  # room. The exemption is a prefix match, so it is also where a sibling
-  # directory or a `..` segment could smuggle a write through.
+  # 25g — an open escape stands the gate down completely, and is logged.
+  tmp=$(setup_state 25g)
+  set_level "$tmp" 3
+  SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/escape.ts" --reason "prod incident" --minutes 10 >/dev/null 2>&1
+  [[ "$(gate_verdict "$tmp" Write)" == "allow" ]] && pass "escape allows Write" || fail "S25g gate still blocking during escape"
+  [[ "$(gate_verdict "$tmp" Edit)" == "allow" ]] && pass "escape allows Edit" || fail "S25g Edit still blocked during escape"
+  node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")); process.exit((Array.isArray(d.escapes) && d.escapes[0].reason==="prod incident")?0:1)' "$tmp/profile.json" \
+    && pass "escape logged with its reason" || fail "S25g escape not logged"
+
+  # 25h — an expired escape re-arms the gate on its own. A valve that
+  # stays open because nobody closed it is the same as no valve.
+  node -e '
+    const fs=require("fs"); const p=process.argv[1];
+    const d=JSON.parse(fs.readFileSync(p,"utf-8"));
+    d.escapes[0].at = new Date(Date.now() - 30*60000).toISOString();
+    fs.writeFileSync(p, JSON.stringify(d));' "$tmp/profile.json"
+  [[ "$(gate_verdict "$tmp" Edit)" == "deny" ]] && pass "expired escape re-arms the gate" || fail "S25h expired escape still open"
+  teardown_state "$tmp"
+
+  # 25i — kill switches. Both must fully disarm: a gate that keeps firing
+  # after the user turned the plugin off gets the plugin uninstalled.
+  tmp=$(setup_state 25i)
+  set_level "$tmp" 3
+  node -e 'const fs=require("fs"),p=process.argv[1];const d=JSON.parse(fs.readFileSync(p,"utf-8"));d.enabled=false;fs.writeFileSync(p,JSON.stringify(d));' "$tmp/profile.json"
+  [[ "$(gate_verdict "$tmp" Edit)" == "allow" ]] && pass "enabled=false disarms the gate" || fail "S25i disabled plugin still gating"
+  rm -f "$tmp/profile.json"
+  [[ "$(gate_verdict "$tmp" Edit)" == "allow" ]] && pass "no profile disarms the gate" || fail "S25i missing profile still gating"
+  teardown_state "$tmp"
+
+  # 25j — the locked-room bug. `socratic off`, `level N` and `challenge`
+  # all mutate profile.json through Write, so gating that path would let
+  # the axis block the very commands that change it. The exemption must
+  # be exact: resolve() first (so a ".." path cannot walk out) and compare
+  # on a separator boundary (so a sibling directory whose name merely
+  # starts the same way is not exempted too).
   tmp=$(setup_state 25j)
-  SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/immersive.ts" --on --minutes 60 >/dev/null 2>&1
-  gate_path() {
+  set_level "$tmp" 3
+  gate_path_verdict() {
     local out
     out=$(node -e '
-      process.stdout.write(JSON.stringify({
-        tool_name: process.argv[1],
-        tool_input: { file_path: process.argv[2], content: "x" },
-        hook_event_name: "PreToolUse",
-      }));
-    ' "$1" "$2" | SOCRATIC_STATE_DIR="$tmp" bash "$SCRIPTS/hook-pre-tool.sh")
+      process.stdout.write(JSON.stringify({tool_name:"Write",tool_input:{file_path:process.argv[1],content:process.argv[2]||"const x = 1"},hook_event_name:"PreToolUse"}));
+    ' "$1" "${2:-}" | SOCRATIC_STATE_DIR="$tmp" bash "$SCRIPTS/hook-pre-tool.sh")
     if [[ -z "$out" ]]; then echo "allow"; else echo "deny"; fi
   }
-  [[ "$(gate_path Write "$tmp/profile.json")" == "allow" ]] && pass "control plane stays writable (profile.json)" || fail "S25j locked out of profile.json"
-  [[ "$(gate_path Write "$tmp/sessions/x.json")" == "allow" ]] && pass "control plane stays writable (session file)" || fail "S25j locked out of session file"
-  [[ "$(gate_path Write "$tmp-otro/profile.json")" == "deny" ]] && pass "exemption does not leak to a similarly named sibling dir" || fail "S25j sibling dir exempted"
-  [[ "$(gate_path Write "$tmp/../escape.ts")" == "deny" ]] && pass "exemption survives a .. traversal" || fail "S25j traversal escaped the gate"
-  [[ "$(gate_path Write "$tmp/../../elsewhere/app.ts")" == "deny" ]] && pass "exemption survives a deeper traversal" || fail "S25j deep traversal escaped"
-  teardown_state "$tmp"
-
-  # 25i — the kill switches must win over the gate. Someone who turned the
-  # plugin off, or paused it, must never be blocked by a stale immersive key.
-  tmp=$(setup_state 25i)
-  SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/immersive.ts" --on --minutes 60 >/dev/null 2>&1
-  node -e '
-    const fs=require("fs"),p=process.argv[1]+"/profile.json";
-    const d=JSON.parse(fs.readFileSync(p,"utf-8")); d.enabled=false;
-    fs.writeFileSync(p,JSON.stringify(d,null,2));
-  ' "$tmp"
-  [[ "$(gate_verdict "$tmp" Write)" == "allow" ]] && pass "enabled=false disarms the gate" || fail "S25i gate ignored the kill switch"
-
-  # An elapsed timebox must not keep the gate shut either.
-  node -e '
-    const fs=require("fs"),p=process.argv[1]+"/profile.json";
-    const d=JSON.parse(fs.readFileSync(p,"utf-8"));
-    d.enabled=true; d.immersive.expires_at=new Date(Date.now()-60000).toISOString();
-    fs.writeFileSync(p,JSON.stringify(d,null,2));
-  ' "$tmp"
-  [[ "$(gate_verdict "$tmp" Write)" == "allow" ]] && pass "expired timebox disarms the gate" || fail "S25i expired timebox still blocking"
+  [[ "$(gate_path_verdict "$tmp/profile.json")" == "allow" ]] && pass "the plugin's own state is exempt" || fail "S25j locked the user out of the control panel"
+  [[ "$(gate_path_verdict "$tmp/sessions/x.json")" == "allow" ]] && pass "state subdirectories are exempt" || fail "S25j session dir not exempt"
+  # A statement-carrying .ts in a look-alike sibling must be DENIED: if the
+  # prefix test leaked, it would be allowed.
+  [[ "$(gate_path_verdict "${tmp}-backup/impl.ts")" == "deny" ]] && pass "look-alike sibling dir is NOT exempt" || fail "S25j sibling dir exempted"
+  [[ "$(gate_path_verdict "$tmp/../escaped.ts")" == "deny" ]] && pass "a .. path cannot walk out of the exemption" || fail "S25j traversal exempted"
   teardown_state "$tmp"
 fi
 
-## S26 immersive rules wiring + user_wrote telemetry
+## S26 axis rules wiring + user_wrote telemetry
 if should_run 26; then
-  header "S26 immersive rules + user_wrote telemetry"
+  header "S26 axis rules + user_wrote telemetry"
 
   # 26a — while immersive, the context must point at the immersive rule
   # files and explicitly retire the level/mode ones, which are all
   # instructions about how to write code.
   tmp=$(setup_state 26a)
-  SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/immersive.ts" --on --minutes 60 >/dev/null 2>&1
+  set_level "$tmp" 3
   OUT=$(fire_pre "$tmp" "quiero agregar validacion al login")
-  echo "$OUT" | grep -q "immersive.md + immersive-ladder.md" && pass "rules line points at the immersive rule files" || fail "S26a immersive rules not referenced"
-  echo "$OUT" | grep -q "do NOT apply while immersive" && pass "level/mode rules explicitly retired" || fail "S26a level/mode not retired"
-  echo "$OUT" | grep -q "user_wrote" && pass "META PROTOCOL requests user_wrote" || fail "S26a user_wrote not requested"
+  echo "$OUT" | grep -q "level-3-architect.md" && pass "rules line points at the level file" || fail "S26a level rules not referenced"
+  echo "$OUT" | grep -q "axis.md + ladder.md" && pass "rules line points at axis + ladder" || fail "S26a axis rules not referenced"
+  echo "$OUT" | grep -q "user_wrote" && pass "META PROTOCOL requests user_wrote where the user writes" || fail "S26a user_wrote not requested"
 
-  # 26b — and none of that may leak when the mode is off.
-  SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/immersive.ts" --off >/dev/null 2>&1
+  # 26b — user_wrote is telemetry about the USER authoring. At L1 and L6
+  # the agent authors, so asking for it would produce a column of `false`
+  # that means nothing, and "no data" and "the user wrote nothing" are
+  # different facts.
+  set_level "$tmp" 1
   OUT=$(fire_pre "$tmp" "quiero agregar validacion al login")
-  echo "$OUT" | grep -q "immersive-ladder" && fail "S26b immersive rules leaked while off" || pass "no immersive rules when off"
-  echo "$OUT" | grep -q "user_wrote" && fail "S26b user_wrote leaked while off" || pass "no user_wrote request when off"
-  echo "$OUT" | grep -q "level-3-\*.md" && pass "normal rules line restored" || fail "S26b normal rules line missing"
+  echo "$OUT" | grep -q "user_wrote" && fail "S26b user_wrote requested at L1" || pass "no user_wrote request at L1"
+  echo "$OUT" | grep -q "level-1-implementer.md" && pass "L1 rules line restored" || fail "S26b L1 rules line missing"
+  set_level "$tmp" 6
+  fire_pre "$tmp" "x" | grep -q "user_wrote" && fail "S26b user_wrote requested at L6" || pass "no user_wrote request at L6"
   teardown_state "$tmp"
 
   # 26c — the Stop hook must persist user_wrote into the turn record.
@@ -975,102 +915,111 @@ if should_run 26; then
 
   # 26d — the rule files themselves must exist and carry the load-bearing
   # rules, since the context block only references them by path.
-  LADDER="$PLUGIN_DIR/skills/socratic/rules/immersive-ladder.md"
-  RULES="$PLUGIN_DIR/skills/socratic/rules/immersive.md"
-  [[ -f "$LADDER" && -f "$RULES" ]] && pass "immersive rule files exist" || fail "S26d rule files missing"
+  LADDER="$PLUGIN_DIR/skills/socratic/rules/ladder.md"
+  RULES="$PLUGIN_DIR/skills/socratic/rules/axis.md"
+  [[ -f "$LADDER" && -f "$RULES" ]] && pass "axis rule files exist" || fail "S26d rule files missing"
   grep -q "copy your response into their editor" "$LADDER" && pass "ladder states the copy-paste litmus test" || fail "S26d litmus test missing"
   grep -q "IS NOT" "$LADDER" && pass "ladder defines what a work order is NOT" || fail "S26d work order negative definition missing"
-  grep -q -i "do not moralize\|Do NOT moralize" "$RULES" && pass "rules forbid moralizing about the unlock" || fail "S26d unlock moralizing rule missing"
+  grep -q -i "do not moralize" "$RULES" && pass "rules forbid moralizing about the escape" || fail "S26d escape moralizing rule missing"
 fi
 
-## S27 autonomy report: git measurement, summary, journal section
+## S27 autonomy report: per-repo baseline, measurement, honesty
 if should_run 27; then
-  header "S27 autonomy report (immersive metric)"
+  header "S27 autonomy report"
 
-  # A throwaway git repo, with the socratic state kept OUTSIDE it — state
-  # files inside the tree would be counted as the user's work.
-  repo="${TEST_ROOT}/repo-27"
-  mkdir -p "$repo"
-  ( cd "$repo" && git init -q . && git config user.email t@t && git config user.name t &&
-    printf 'line1\nline2\n' > a.txt && git add . && git commit -qm base ) >/dev/null 2>&1
+  # Claude Code sends a NATIVE path in the hook payload. These tests must
+  # too: an MSYS path (/tmp/...) is not resolvable by node, repoRoot
+  # returns null, and the baseline would silently never capture — which
+  # would make every assertion here vacuously "not measured".
+  winpath() { cygpath -m "$1" 2>/dev/null || echo "$1"; }
 
-  tmp=$(setup_state 27)
-  ( cd "$repo" && SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/immersive.ts" --on --minutes 60 ) >/dev/null 2>&1
-  HASBASE=$(node -e '
-    const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8"));
-    const b=d.immersive.git_baseline;
-    process.stdout.write(b && b.head ? "yes":"no");
-  ' "$tmp/profile.json")
-  [[ "$HASBASE" == "yes" ]] && pass "git baseline captured at activation" || fail "S27 no git baseline"
+  repoA="${TEST_ROOT}/repo-27a"
+  repoB="${TEST_ROOT}/repo-27b"
+  for d in "$repoA" "$repoB"; do
+    mkdir -p "$d"
+    ( cd "$d" && git init -q . && git config user.email t@t && git config user.name t &&
+      printf 'base\n' > README.md && git add . && git commit -qm base ) >/dev/null 2>&1
+  done
 
-  # 5 lines committed mid-session + 3 uncommitted + 1 deleted. Committing
-  # moves HEAD and resets the working-tree diff, so a naive measurement
-  # would go negative exactly when the user was most productive.
-  ( cd "$repo" && printf 'a\nb\nc\nd\ne\n' >> a.txt && git add . && git commit -qm work ) >/dev/null 2>&1
-  ( cd "$repo" && printf 'f\ng\nh\n' >> a.txt )
+  fire_cwd() {
+    local tmp="$1"; local dir="$2"; local w
+    w=$(winpath "$dir")
+    SOCRATIC_STATE_DIR="$tmp" bash "$SCRIPTS/hook-pre-prompt.sh" >/dev/null 2>&1 <<EOF
+{"prompt":"seguimos","cwd":"$w","hook_event_name":"UserPromptSubmit"}
+EOF
+  }
+  run_status() {
+    local tmp="$1"; local dir="$2"
+    ( cd "$dir" && SOCRATIC_STATE_DIR="$tmp" SOCRATIC_CWD="$(winpath "$dir")" bun run "$SCRIPTS/status.ts" 2>&1 )
+  }
+
+  # 27a — THE v0.4 BUG. The old baseline was captured once, when
+  # immersive was switched on, in whatever directory that happened to be.
+  # A user who then worked in another project got an honest "+0 lines"
+  # about a tree nobody had touched. Baselines are per-repo now, and the
+  # hook refreshes the one for wherever the user actually is.
+  tmp=$(setup_state 27a); set_level "$tmp" 3
+  fire_cwd "$tmp" "$repoA"
+  node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")); process.exit(Object.keys(d.git_baselines||{}).length===1?0:1)' "$tmp/profile.json" \
+    && pass "first turn captures a baseline for the current repo" || fail "S27a no baseline captured"
+  fire_cwd "$tmp" "$repoB"
+  node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")); process.exit(Object.keys(d.git_baselines||{}).length===2?0:1)' "$tmp/profile.json" \
+    && pass "switching projects captures its own baseline" || fail "S27a second repo not captured"
+
+  # 27b — the formula has to survive a mid-session commit. Committing
+  # moves HEAD and resets the working-tree diff, so a naive "diff now
+  # minus diff then" goes NEGATIVE exactly when the user was most
+  # productive. And an untracked file is invisible to `git diff HEAD`,
+  # which is the common case when starting something new.
+  printf 'l1\nl2\nl3\nl4\nl5\n' > "$repoA/mine.js"
+  ( cd "$repoA" && git add . && git commit -qm work ) >/dev/null 2>&1
+  printf 'l6\nl7\nl8\n' >> "$repoA/mine.js"
+  printf 'x\n' > "$repoA/untracked.js"
+
+  OUT=$(run_status "$tmp" "$repoA")
+  echo "$OUT" | grep -q "you wrote: +9" && pass "counts committed + pending + untracked" || fail "S27b wrong count: $(echo "$OUT" | grep 'you wrote')"
+  echo "$OUT" | grep -q "repo-27a" && pass "names the repo it measured" || fail "S27b repo not named"
+
+  # 27c — and the other repo keeps its own number.
+  OUT=$(run_status "$tmp" "$repoB")
+  echo "$OUT" | grep -q "you wrote: +0" && pass "each repo measures its own tree" || fail "S27c trees mixed: $(echo "$OUT" | grep 'you wrote')"
+
+  # 27d — the agent's own lines are subtracted. Unlike an escape, the
+  # gate saw every file it allowed and counted the lines, so here the
+  # user's number can actually be theirs.
   node -e '
-    const fs=require("fs"),p=process.argv[1]+"/a.txt";
-    const l=fs.readFileSync(p,"utf8").split("\n"); l.splice(0,1);
-    fs.writeFileSync(p,l.join("\n"));
-  ' "$repo"
-
-  OUT=$( cd "$repo" && SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/immersive.ts" --off 2>&1 )
-  echo "$OUT" | grep -q "you wrote: +8 / -1 lines" && pass "line count survives a mid-session commit (+8/-1)" || fail "S27 wrong line count: $(echo "$OUT" | grep 'you wrote')"
-  echo "$OUT" | grep -q "average ladder rung" && pass "report includes the ladder rung" || fail "S27 rung missing"
-  echo "$OUT" | grep -q "unlocks: 0" && pass "report includes unlock count" || fail "S27 unlocks missing"
-
-  # The summary must be archived where the journal can find it.
-  ARCH=$(node -e '
-    const fs=require("fs");
-    const d=JSON.parse(fs.readFileSync(process.argv[1],"utf-8"));
-    const a=d.immersive_summaries;
-    process.stdout.write(Array.isArray(a)&&a.length===1&&a[0].lines_added===8?"yes":"no");
-  ' "$tmp/sessions/$(date -u +%Y-%m-%d).json")
-  [[ "$ARCH" == "yes" ]] && pass "summary archived to the session file" || fail "S27 summary not archived"
-
-  # The journal must surface it.
-  JOUT=$(SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/build-journal.ts" --period today 2>&1)
-  echo "$JOUT" | grep -q "## Autonomy (immersive mode)" && pass "journal has the autonomy section" || fail "S27 journal section missing"
-  echo "$JOUT" | grep -q "you wrote: +8 / -0 lines\|you wrote: +8 / -1 lines" && pass "journal reports the measured lines" || fail "S27 journal lines wrong"
-  teardown_state "$tmp"
-
-  # 27b — an unlock contaminates the line count (the agent can write while
-  # it lasts), so the report must say so rather than imply a clean number.
-  tmp=$(setup_state 27b)
-  ( cd "$repo" && SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/immersive.ts" --on --minutes 60 ) >/dev/null 2>&1
-  SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/immersive.ts" --unlock --reason "prod hotfix" --minutes 5 >/dev/null 2>&1
-  OUT=$( cd "$repo" && SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/immersive.ts" --off 2>&1 )
-  echo "$OUT" | grep -q "during an unlock is included" && pass "report discloses unlock contamination" || fail "S27b contamination note missing"
-  echo "$OUT" | grep -q "prod hotfix" && pass "report lists the unlock reason" || fail "S27b unlock reason missing"
-  teardown_state "$tmp"
-
-  # 27c — outside a git repo the report degrades instead of failing.
-  tmp=$(setup_state 27c)
-  nonrepo="${TEST_ROOT}/nonrepo-27"; mkdir -p "$nonrepo"
-  ( cd "$nonrepo" && SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/immersive.ts" --on --minutes 60 ) >/dev/null 2>&1
-  OUT=$( cd "$nonrepo" && SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/immersive.ts" --off 2>&1 )
-  echo "$OUT" | grep -q "not measured" && pass "degrades gracefully outside a git repo" || fail "S27c did not degrade cleanly"
-  teardown_state "$tmp"
-
-  # 27d — ending by timebox must report too. Running out the clock is the
-  # common case; it must not be the silent one.
-  tmp=$(setup_state 27d)
-  ( cd "$repo" && SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/immersive.ts" --on --minutes 30 ) >/dev/null 2>&1
-  node -e '
-    const fs=require("fs"),p=process.argv[1]+"/profile.json";
+    const fs=require("fs"); const p=process.argv[1];
     const d=JSON.parse(fs.readFileSync(p,"utf-8"));
-    d.immersive.expires_at=new Date(Date.now()-60000).toISOString();
-    fs.writeFileSync(p,JSON.stringify(d,null,2));
-  ' "$tmp"
-  OUT=$(fire_pre "$tmp" "seguimos")
-  echo "$OUT" | grep -q "session summary (relay verbatim)" && pass "expiry injects the summary for the model to relay" || fail "S27d expiry summary missing"
-  echo "$OUT" | grep -q "timebox elapsed" && pass "expiry summary says how it ended" || fail "S27d ended_by missing"
-  ARCH=$(node -e '
-    const fs=require("fs");
-    const d=JSON.parse(fs.readFileSync(process.argv[1],"utf-8"));
-    process.stdout.write(Array.isArray(d.immersive_summaries)&&d.immersive_summaries.length===1?"yes":"no");
-  ' "$tmp/sessions/$(date -u +%Y-%m-%d).json")
-  [[ "$ARCH" == "yes" ]] && pass "expired session is archived too" || fail "S27d expired summary not archived"
+    d.axis_budget={date:new Date().toISOString().slice(0,10),files_used:1,lines_written:4};
+    fs.writeFileSync(p,JSON.stringify(d));' "$tmp/profile.json"
+  OUT=$(run_status "$tmp" "$repoA")
+  echo "$OUT" | grep -q "you wrote: +5" && pass "subtracts the agent's 4 lines (9-4=5)" || fail "S27d no subtraction: $(echo "$OUT" | grep 'you wrote')"
+  echo "$OUT" | grep -q "excluded from the count above" && pass "states the subtraction" || fail "S27d subtraction not disclosed"
+
+  # 27e — an escape cannot be attributed: its work lands in the same
+  # working tree as the user's. Saying so is cheaper than a wrong number
+  # the user might trust.
+  SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/escape.ts" --reason "prod incident" --minutes 10 >/dev/null 2>&1
+  OUT=$(run_status "$tmp" "$repoA")
+  echo "$OUT" | grep -q "included in the line count above" && pass "discloses escape contamination" || fail "S27e contamination not disclosed"
+  echo "$OUT" | grep -q "prod incident" && pass "the escape reason is shown" || fail "S27e escape reason missing"
+  teardown_state "$tmp"
+
+  # 27f — outside a git repo it degrades to the soft signals instead of
+  # failing, and never prints a zero that actually means "not measured".
+  nonrepo="${TEST_ROOT}/nonrepo-27"; mkdir -p "$nonrepo"
+  tmp=$(setup_state 27f); set_level "$tmp" 3
+  OUT=$(run_status "$tmp" "$nonrepo")
+  echo "$OUT" | grep -q "not measured" && pass "degrades cleanly outside a git repo" || fail "S27f did not degrade cleanly"
+  echo "$OUT" | grep -q "you wrote: +0" && fail "S27f printed a fake zero" || pass "does not print a zero it cannot justify"
+  teardown_state "$tmp"
+
+  # 27g — level 6 reports "not applicable", never a number. A zero that
+  # really means "not measured" is the dishonest datum this report was
+  # built not to produce.
+  tmp=$(setup_state 27g); set_level "$tmp" 6
+  OUT=$(run_status "$tmp" "$repoA")
+  echo "$OUT" | grep -q "not applicable" && pass "level 6 reports not-applicable" || fail "S27g L6 reported a number"
   teardown_state "$tmp"
 fi
 
@@ -1141,13 +1090,18 @@ if should_run 28; then
   [[ "$?" == "2" ]] && pass "missing file refused (exit 2)" || fail "S28d missing file accepted"
   teardown_state "$tmp"
 
-  # 28e — a build drill without immersive is not a drill.
-  tmp=$(setup_state 28e)
+  # 28e — a build drill below level 3 is not a drill: the agent would
+  # simply write the bodies and the exercise would measure nothing.
+  tmp=$(setup_state 28e); set_level "$tmp" 2
   ERR=$( cd "$repo" && SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/drill.ts" --kind build 2>&1 )
-  echo "$ERR" | grep -q "needs immersive mode" && pass "build drill requires immersive mode" || fail "S28e build allowed without immersive"
+  echo "$ERR" | grep -q "needs level 3 or higher" && pass "build drill requires level 3+" || fail "S28e build allowed below level 3"
+  # The off ramp is not "even higher" — it is the axis switched off.
+  set_level "$tmp" 6
+  ERR=$( cd "$repo" && SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/drill.ts" --kind build 2>&1 )
+  echo "$ERR" | grep -q "needs level 3 or higher" && pass "build drill refused on the off ramp" || fail "S28e build allowed at level 6"
 
-  # 28f — with immersive on, the build drill measures what the user wrote.
-  ( cd "$repo" && SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/immersive.ts" --on --minutes 45 ) >/dev/null 2>&1
+  # 28f — at level 3+ the build drill measures what the user wrote.
+  set_level "$tmp" 3
   OUT=$( cd "$repo" && SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/drill.ts" --kind build 2>&1 )
   echo "$OUT" | grep -q "measuring: yes (git)" && pass "build drill captures a git baseline" || fail "S28f no baseline"
   ( cd "$repo" && printf 'a\nb\nc\nd\ne\nf\n' >> src/alpha.ts )
@@ -1176,14 +1130,9 @@ if should_run 28; then
   grep -q "failed drill is a successful measurement" "$DR" && pass "rules frame failure as the finding" || fail "S28h failure framing missing"
 fi
 
-## S29 scaffold window: create-vs-edit, caps, accounting, report subtraction
+## S29 authorship layers: create-vs-edit, shape, daily budget
 if should_run 29; then
-  header "S29 scaffold window"
-
-  repo="${TEST_ROOT}/repo-29"
-  mkdir -p "$repo"
-  ( cd "$repo" && git init -q . && git config user.email t@t && git config user.name t &&
-    printf 'base\n' > README.md && git add . && git commit -qm base ) >/dev/null 2>&1
+  header "S29 authorship layers (shape + budget)"
 
   # Helper: ask the gate about a Write, with explicit content.
   gate_write() {
@@ -1198,83 +1147,421 @@ if should_run 29; then
     ' "$tool" "$path" "$content" | SOCRATIC_STATE_DIR="$tmp" bash "$SCRIPTS/hook-pre-tool.sh")
     if [[ -z "$out" ]]; then echo "allow"; else echo "deny"; fi
   }
+  gate_reason() {
+    local tmp="$1"; local path="$2"; local content="$3"
+    node -e '
+      process.stdout.write(JSON.stringify({
+        tool_name: "Write",
+        tool_input: { file_path: process.argv[1], content: process.argv[2] },
+        hook_event_name: "PreToolUse",
+      }));
+    ' "$path" "$content" | SOCRATIC_STATE_DIR="$tmp" bash "$SCRIPTS/hook-pre-tool.sh"
+  }
 
-  # 29a — the window is not available outside immersive mode, where the
-  # agent already writes freely and it would mean nothing.
+  work="${TEST_ROOT}/work-29"
+  mkdir -p "$work"
+
+  SKEL='import { db } from "./db"
+
+export interface User {
+  id: string
+  email: string
+}
+
+// TODO: look the user up by email
+export function findUser(email: string): User | null
+'
+  IMPL='export function findUser(email: string): User | null {
+  const rows = db.query("select * from users", [email])
+  if (rows.length === 0) return null
+  return rows[0]
+}
+'
+
+  # --- LAYER 1: create vs edit ---------------------------------------------
+  # The only authorship boundary that can be drawn without anyone's
+  # opinion. "Is this boilerplate or the code that teaches them?" is a
+  # judgment call; whether a file already exists is a fact.
   tmp=$(setup_state 29a)
-  ERR=$( cd "$repo" && SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/immersive.ts" --scaffold 2>&1 )
-  echo "$ERR" | grep -q "needs immersive mode" && pass "scaffold requires immersive mode" || fail "S29a scaffold granted outside immersive"
-
-  # 29b — per-level allowance comes from algorithm.json (level 3 -> 5).
-  ( cd "$repo" && SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/immersive.ts" --on --minutes 60 ) >/dev/null 2>&1
-  OUT=$( cd "$repo" && SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/immersive.ts" --scaffold 2>&1 )
-  echo "$OUT" | grep -q "5 new file(s)" && pass "file allowance scales with level (L3 -> 5)" || fail "S29b wrong allowance: $OUT"
-
-  # 29c — the create/edit line. This is the whole enforcement idea: the
-  # gate decides on whether the file exists, never on whether the code
-  # "looks like boilerplate".
-  [[ "$(gate_write "$tmp" "$repo/nuevo.html" "<html>")" == "allow" ]] && pass "creating a new file is allowed" || fail "S29c new file blocked"
-  [[ "$(gate_write "$tmp" "$repo/README.md" "x")" == "deny" ]] && pass "writing over an existing file is denied" || fail "S29c existing file allowed"
-  [[ "$(gate_write "$tmp" "$repo/nuevo.html" "x" Edit)" == "deny" ]] && pass "Edit stays denied with the window open" || fail "S29c Edit allowed"
-  [[ "$(gate_write "$tmp" "$repo/otro.ts" "y" MultiEdit)" == "deny" ]] && pass "MultiEdit stays denied with the window open" || fail "S29c MultiEdit allowed"
-
-  # 29d — a scaffold is a skeleton, not an implementation.
-  BIG=$(node -e 'process.stdout.write(Array.from({length:200},(_,i)=>"l"+i).join("\n"))')
-  [[ "$(gate_write "$tmp" "$repo/gigante.ts" "$BIG")" == "deny" ]] && pass "file over the line cap is denied" || fail "S29d line cap not enforced"
-
-  # A denial must not consume a slot: 1 file used so far (29c), not 2.
-  USED=$(node -e '
-    const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8"));
-    process.stdout.write(String(d.immersive.scaffold.files_used));
-  ' "$tmp/profile.json")
-  [[ "$USED" == "1" ]] && pass "denied writes do not consume a slot" || fail "S29d slot count wrong (got $USED)"
-
-  # 29e — exhausting the allowance closes the window by itself.
-  for i in 2 3 4 5; do gate_write "$tmp" "$repo/f$i.ts" "a
-b" >/dev/null; done
-  [[ "$(gate_write "$tmp" "$repo/f6.ts" "a")" == "deny" ]] && pass "window closes when the allowance runs out" || fail "S29e window still open past the cap"
-  ST=$( cd "$repo" && SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/immersive.ts" --scaffold-status 2>&1 )
-  echo "$ST" | grep -q "no window open" && pass "status reports the exhausted window as closed" || fail "S29e status still open"
+  set_level "$tmp" 3
+  [[ "$(gate_write "$tmp" "$work/fresh.ts" "$SKEL")" == "allow" ]] && pass "creating a skeleton is allowed" || fail "S29a skeleton denied"
+  touch "$work/already.ts"
+  [[ "$(gate_write "$tmp" "$work/already.ts" "$SKEL")" == "deny" ]] && pass "writing over an existing file is denied" || fail "S29a existing-file write allowed"
+  [[ "$(gate_write "$tmp" "$work/already.ts" "$SKEL" Edit)" == "deny" ]] && pass "Edit stays denied" || fail "S29a Edit allowed"
   teardown_state "$tmp"
 
-  # 29f — accounting: agent lines are tracked and subtracted, and the
-  # user's own new files are counted even before `git add`.
-  repo2="${TEST_ROOT}/repo-29f"
-  mkdir -p "$repo2"
-  ( cd "$repo2" && git init -q . && git config user.email t@t && git config user.name t &&
-    printf 'base\n' > README.md && git add . && git commit -qm base ) >/dev/null 2>&1
-  tmp=$(setup_state 29f)
-  ( cd "$repo2" && SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/immersive.ts" --on --minutes 60 ) >/dev/null 2>&1
-  ( cd "$repo2" && SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/immersive.ts" --scaffold ) >/dev/null 2>&1
+  # --- LAYER 2: shape -------------------------------------------------------
+  # THE RU-3 HOLE. Nothing in layer 1 stops the agent from creating a file
+  # that does not exist and putting the whole implementation in it. The
+  # check does not try to DETECT an implementation (open-ended, and the
+  # model can out-invent any blacklist) — it asserts the closed property
+  # "this has the shape of a skeleton", with STATEMENT as the residual
+  # category so unknown syntax fails closed.
+  tmp=$(setup_state 29b)
+  set_level "$tmp" 3
+  [[ "$(gate_write "$tmp" "$work/impl.ts" "$IMPL")" == "deny" ]] && pass "a new file carrying an implementation is DENIED" || fail "S29b the RU-3 hole is open"
+  gate_reason "$tmp" "$work/impl.ts" "$IMPL" | grep -q "executable statement" && pass "denial names the statement count" || fail "S29b shape denial is not actionable"
+  [[ "$(gate_write "$tmp" "$work/one.ts" 'export function f(): void { doIt() }')" == "deny" ]] && pass "a body smuggled onto the signature line is denied" || fail "S29b inline body allowed"
+  # Statements packed behind semicolons must not slip under a per-line count.
+  [[ "$(gate_write "$tmp" "$work/packed.ts" 'function f(){ const a=1; const b=2; const c=3; return a+b+c }')" == "deny" ]] && pass "semicolon-packed statements still count" || fail "S29b packing evades the budget"
 
-  # The agent scaffolds 12 lines (gate says allow, then the tool writes).
-  AGENT=$(node -e 'process.stdout.write(Array.from({length:12},(_,i)=>"a"+i).join("\n")+"\n")')
-  [[ "$(gate_write "$tmp" "$repo2/skeleton.html" "$AGENT")" == "allow" ]] || fail "S29f scaffold write blocked"
-  node -e 'require("fs").writeFileSync(process.argv[1], process.argv[2])' "$repo2/skeleton.html" "$AGENT"
+  # Markup has no bodies to leave empty, so it is judged by the line cap
+  # alone — a statement budget would deny every honest scaffold.
+  [[ "$(gate_write "$tmp" "$work/index.html" '<!doctype html>
+<html><body><div id="root"></div></body></html>')" == "allow" ]] && pass "html skeleton allowed" || fail "S29b html denied"
+  [[ "$(gate_write "$tmp" "$work/package.json" '{"name":"app","scripts":{"dev":"vite"}}')" == "allow" ]] && pass "package.json allowed" || fail "S29b package.json denied"
 
-  # The user writes 15 lines in a brand-new, still-untracked file.
+  # The line cap still bounds a file that is all comments/declarations.
+  #
+  # Generated with shell builtins, NOT `node -e`: under Git Bash, MSYS
+  # argument conversion rewrites a `-e` payload containing `//` or `\n`
+  # as if it were a path ("// line " becomes "/ line ", "\n" becomes
+  # "/n"), so the fixture silently collapses to a single line and the
+  # assertion tests nothing.
+  BIG=""
+  for i in $(seq 1 120); do BIG="${BIG}// line ${i}"$'\n'; done
+  [[ "$(gate_write "$tmp" "$work/big.ts" "$BIG")" == "deny" ]] && pass "line cap denies an oversized file" || fail "S29b line cap not enforced"
+  teardown_state "$tmp"
+
+  # --- L2 allows trivial bodies --------------------------------------------
+  # The split is not "easy vs hard", it is "load-bearing vs not". L2 gets a
+  # small allowance so plumbing does not have to be typed by hand.
+  tmp=$(setup_state 29c)
+  set_level "$tmp" 2
+  [[ "$(gate_write "$tmp" "$work/trivial.ts" 'export class Repo {
+  private db: Db
+
+  getId(u: User): string {
+    return u.id
+  }
+}')" == "allow" ]] && pass "L2 allows trivial bodies" || fail "S29c L2 denied a trivial body"
+  teardown_state "$tmp"
+
+  # --- LAYER 3: daily budget ------------------------------------------------
+  # Does not prevent, it bounds the blast radius. Replaces the v0.4
+  # user-granted window: the gate never needed the model's opinion, only a
+  # fact and a counter.
+  tmp=$(setup_state 29d)
+  set_level "$tmp" 5   # 3 files/day
+  for i in 1 2 3; do gate_write "$tmp" "$work/b$i.ts" "$SKEL" > /dev/null; done
+  USED=$(node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")); process.stdout.write(String(d.axis_budget && d.axis_budget.files_used))' "$tmp/profile.json")
+  [[ "$USED" == "3" ]] && pass "allowed writes charge the budget" || fail "S29d budget not charged (got $USED)"
+  [[ "$(gate_write "$tmp" "$work/b4.ts" "$SKEL")" == "deny" ]] && pass "the 4th file is denied on a 3-file budget" || fail "S29d budget not enforced"
+  gate_reason "$tmp" "$work/b4.ts" "$SKEL" | grep -q "resets tomorrow" && pass "denial says when it resets" || fail "S29d budget denial unclear"
+
+  # A denial must never charge: being told no is not a use of the budget.
+  BEFORE=$(node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")); process.stdout.write(String(d.axis_budget.files_used))' "$tmp/profile.json")
+  gate_write "$tmp" "$work/b5.ts" "$IMPL" > /dev/null
+  AFTER=$(node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")); process.stdout.write(String(d.axis_budget.files_used))' "$tmp/profile.json")
+  [[ "$BEFORE" == "$AFTER" ]] && pass "a denial does not consume budget (I4)" || fail "S29d denial charged the budget"
+
+  # Yesterday's budget is spent, not carried.
+  node -e '
+    const fs=require("fs"); const p=process.argv[1];
+    const d=JSON.parse(fs.readFileSync(p,"utf-8"));
+    d.axis_budget.date = "2020-01-01";
+    fs.writeFileSync(p, JSON.stringify(d));' "$tmp/profile.json"
+  [[ "$(gate_write "$tmp" "$work/b6.ts" "$SKEL")" == "allow" ]] && pass "budget resets on a new UTC day" || fail "S29d stale budget still blocking"
+  teardown_state "$tmp"
+
+  # 29e — the rules must forbid inferring permission from prose.
+  RULES="$PLUGIN_DIR/skills/socratic/rules/axis.md"
+  # Substring must not span a line wrap: the rule is prose and gets
+  # rewrapped whenever the file is edited.
+  grep -q "treat prose as permission" "$RULES" && pass "rules forbid inferring a grant from prose" || fail "S29e prose rule missing"
+  grep -q -i "suggest" "$RULES" && pass "rules allow suggesting the command" || fail "S29e suggestion rule missing"
+fi
+
+## S30 the axis: level contract, off ramp, budget, escape
+if should_run 30; then
+  header "S30 axis contract"
+
+  # 30a — data/levels.json and the in-code FALLBACK must agree. The
+  # "single source of truth" claim rots silently otherwise: the JSON is
+  # what ships, the FALLBACK is what runs when the JSON is unreadable,
+  # and a drift between them would only surface on a broken install.
+  bun run "$PLUGIN_DIR/tests/fixtures/axis-contract.ts" > /dev/null 2>&1 \
+    && pass "levels.json matches the in-code FALLBACK" \
+    || fail "S30a levels.json and FALLBACK disagree"
+
+  # 30b-g — behavioral checks. They live in a fixture because bun does
+  # not resolve MSYS paths inside an import string, and $SCRIPTS is
+  # exactly that under Git Bash.
+  AXIS_OUT=$(bun run "$PLUGIN_DIR/tests/fixtures/axis-behavior.ts" 2>&1)
+
+  # R6.1: an automatic path must never land on the off ramp. A plugin
+  # that promotes you to "the agent does everything" sabotages itself.
+  echo "$AXIS_OUT" | grep -q "^clamp=OK$" \
+    && pass "clampToAxis never reaches the off ramp" || fail "S30b clamp allows level 6"
+
+  # readLevel PRESERVES 6. Every v0.4 reader open-coded min(5,max(1,n)),
+  # which maps 6 to 5 — and under the new axis 5 means "writes nothing,
+  # asks only", the exact opposite of 6. The user would get the most
+  # restrictive setting believing they had switched the axis off, and
+  # nothing would report an error.
+  echo "$AXIS_OUT" | grep -q "^readlevel=OK$" \
+    && pass "readLevel preserves the off ramp" || fail "S30c readLevel clamps 6 away"
+
+  echo "$AXIS_OUT" | grep -q "^authorship=OK$" \
+    && pass "edit/statement contract matches levels.json" || fail "S30d authorship contract drifted"
+
+  # The level bounds the ladder; the rung still moves inside it.
+  # Collapsing them would make getting stuck on one bug demote you.
+  echo "$AXIS_OUT" | grep -q "^rung=OK$" \
+    && pass "rung clamps into the level range" || fail "S30e rung range wrong"
+
+  # Budget keyed by UTC: the suite has already been bitten once by local
+  # dates (five asserts failing only between 17:00 and midnight, UTC-7).
+  echo "$AXIS_OUT" | grep -q "^budget=OK$" \
+    && pass "budget accumulates and resets on the UTC day" || fail "S30f budget wrong"
+
+  # A gate that blocks real work by mistake gets uninstalled, so every
+  # uncertain path has to end open.
+  echo "$AXIS_OUT" | grep -q "^failopen=OK$" \
+    && pass "L1, L6 and an open escape all disarm the gate" || fail "S30g fail-open path broken"
+fi
+
+## S31 migration v0.4.x -> v0.5
+if should_run 31; then
+  header "S31 profile migration"
+
+  # 31a — THE dangerous case. Old L5 meant "write it for me and be
+  # quiet"; new L5 means the opposite, and both read as "silent", so the
+  # user would not notice until it hurt. L6 is bit-for-bit the old L5,
+  # which is what makes this migration safe.
+  tmp=$(setup_state 31a)
+  printf '{"global_level":5,"mode":"productive","enabled":true}' > "$tmp/profile.json"
+  OUT=$(SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/migrate-profile.ts" 2>&1)
+  node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")); process.exit((d.global_level===6 && d.schema_version===2 && d.mode===undefined && d.enabled===true)?0:1)' "$tmp/profile.json" \
+    && pass "old L5 -> L6, mode dropped, schema stamped" || fail "S31a migration wrong"
+  echo "$OUT" | grep -q "nivel 6" && pass "notice names level 6 (R6.5/M4)" || fail "S31a notice hides the level"
+  echo "$OUT" | grep -q "1-5" && pass "notice says where the real axis lives" || fail "S31a notice omits the way back"
+
+  # 31b — idempotent (M2). A second run is a silent noop, not a second
+  # migration and not a second notice.
+  OUT2=$(SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/migrate-profile.ts" 2>&1)
+  echo "$OUT2" | grep -q "nothing to do" && pass "second run is a noop" || fail "S31b migration not idempotent"
+  teardown_state "$tmp"
+
+  # 31c — an active immersive session already meant "the agent writes
+  # nothing", which is L4 regardless of the level it was layered on.
+  tmp=$(setup_state 31c)
+  printf '{"global_level":2,"mode":"learn","immersive":{"active":true,"started_at":"2026-08-03T10:00:00.000Z","expires_at":null,"unlocks":[{"at":"2026-08-03T11:00:00.000Z","reason":"prod","minutes":10}],"baseline_hint":2,"git_baseline":{"repo":"/x","head":"abc","added":0,"removed":0}}}' > "$tmp/profile.json"
+  SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/migrate-profile.ts" > /dev/null 2>&1
+  node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")); process.exit((d.global_level===4 && d.immersive===undefined && Array.isArray(d.escapes) && d.escapes.length===1 && d.git_baseline)?0:1)' "$tmp/profile.json" \
+    && pass "active immersive -> L4, subtree flattened" || fail "S31c immersive migration wrong"
+  teardown_state "$tmp"
+
+  # 31d — identity mapping for the levels that keep their number.
+  tmp=$(setup_state 31d)
+  IDENT_OK=1
+  for lvl in 1 2 3 4; do
+    printf '{"global_level":%s}' "$lvl" > "$tmp/profile.json"
+    SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/migrate-profile.ts" > /dev/null 2>&1
+    node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")); process.exit(d.global_level===Number(process.argv[2])?0:1)' "$tmp/profile.json" "$lvl" || IDENT_OK=0
+  done
+  [[ "$IDENT_OK" -eq 1 ]] && pass "levels 1-4 map to themselves" || fail "S31d identity mapping broken"
+  teardown_state "$tmp"
+
+  # 31e — refuses to touch a corrupt profile rather than overwriting it.
+  tmp=$(setup_state 31e)
+  printf 'not json at all' > "$tmp/profile.json"
+  SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/migrate-profile.ts" > /dev/null 2>&1 \
+    && fail "S31e migrated a corrupt profile" || pass "corrupt profile is refused, not overwritten"
+  grep -q "not json at all" "$tmp/profile.json" && pass "corrupt profile left untouched" || fail "S31e corrupt profile was clobbered"
+  teardown_state "$tmp"
+fi
+
+## S32 handoff: protocol wiring, unit continuity, evaluation rules
+if should_run 32; then
+  header "S32 guided handoff"
+
+  # 32a — the protocol appears exactly where a unit changes hands, and
+  # nowhere else. At L1 the agent writes; at L5 it does not direct the
+  # work at all. Pointing at a handoff protocol there would invite the
+  # model to invent one.
+  tmp=$(setup_state 32a)
+  set_level "$tmp" 3
+  OUT=$(fire_pre "$tmp" "hagamos el login")
+  echo "$OUT" | grep -q "HANDOFF PROTOCOL (by unit)" && pass "L3 announces the handoff protocol" || fail "S32a L3 missing handoff protocol"
+  echo "$OUT" | grep -q "handoff.md" && pass "L3 rules line points at handoff.md" || fail "S32a handoff.md not referenced"
+  echo "$OUT" | grep -q "STATE ACCEPTANCE CRITERIA before any code exists" && pass "criteria-first is stated" || fail "S32a criteria-first missing"
+
+  set_level "$tmp" 2
+  OUT=$(fire_pre "$tmp" "hagamos el login")
+  echo "$OUT" | grep -q "HANDOFF PROTOCOL (by module)" && pass "L2 hands off by module" || fail "S32a L2 handoff unit wrong"
+
+  set_level "$tmp" 4
+  OUT=$(fire_pre "$tmp" "hagamos el login")
+  echo "$OUT" | grep -q "HANDOFF PROTOCOL (by subproblem)" && pass "L4 hands off by subproblem" || fail "S32a L4 handoff unit wrong"
+
+  set_level "$tmp" 5
+  OUT=$(fire_pre "$tmp" "hagamos el login")
+  echo "$OUT" | grep -q "HANDOFF PROTOCOL" && fail "S32a L5 leaked a handoff protocol" || pass "L5 has no handoff (it does not direct)"
+  echo "$OUT" | grep -q "You do NOT direct the work at this level" && pass "L5 is told not to decompose" || fail "S32a L5 missing the no-direction rule"
+
+  set_level "$tmp" 1
+  OUT=$(fire_pre "$tmp" "hagamos el login")
+  echo "$OUT" | grep -q "HANDOFF PROTOCOL" && fail "S32a L1 leaked a handoff protocol" || pass "L1 has no handoff (the agent writes)"
+  teardown_state "$tmp"
+
+  # 32b — the statement allowance is announced with the real number, so
+  # the model is not left to guess what the gate will accept.
+  tmp=$(setup_state 32b)
+  set_level "$tmp" 3
+  fire_pre "$tmp" "x" | grep -q "ZERO executable statements" && pass "L3 announces a zero statement allowance" || fail "S32b L3 allowance not announced"
+  set_level "$tmp" 2
+  fire_pre "$tmp" "x" | grep -q "at most 8 executable statements" && pass "L2 announces its allowance" || fail "S32b L2 allowance not announced"
+  teardown_state "$tmp"
+
+  # 32c — a unit in flight survives across turns. Without this the
+  # protocol degrades into "frame everything, then chat".
+  tmp=$(setup_state 32c)
+  set_level "$tmp" 3
+  SDOC="$tmp/sessions/$(date -u +%Y-%m-%d).json"
   node -e '
     const fs=require("fs");
-    fs.writeFileSync(process.argv[1], Array.from({length:15},(_,i)=>"u"+i).join("\n")+"\n");
-  ' "$repo2/mine.js"
-
-  OUT=$( cd "$repo2" && SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/immersive.ts" --off 2>&1 )
-  echo "$OUT" | grep -q "you wrote: +15 / -0 lines" && pass "untracked new files count as the user's work" || fail "S29f wrong user count: $(echo "$OUT" | grep 'you wrote')"
-  echo "$OUT" | grep -q "scaffolded by the agent: +12 lines" && pass "agent lines are reported separately" || fail "S29f scaffold lines missing"
-  echo "$OUT" | grep -q "excluded from the count above" && pass "report states the subtraction" || fail "S29f subtraction not disclosed"
-
-  ARCH=$(node -e '
-    const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8"));
-    const s=d.immersive_summaries[0];
-    process.stdout.write(s.scaffold_lines===12 && s.scaffold_windows===1 && s.unlock_count===0 ? "yes":"no");
-  ' "$tmp/sessions/$(date -u +%Y-%m-%d).json")
-  [[ "$ARCH" == "yes" ]] && pass "scaffold is accounted apart from unlocks" || fail "S29f scaffold/unlock accounting mixed"
+    fs.writeFileSync(process.argv[1], JSON.stringify({
+      date: process.argv[2], turns: [],
+      handoff: { unit: "validateCredentials", criteria: ["rejects empty email","same error for both cases"], opened_at: "2026-09-01T10:00:00Z" },
+    }));' "$SDOC" "$(date -u +%Y-%m-%d)"
+  OUT=$(fire_pre "$tmp" "ya la escribi")
+  echo "$OUT" | grep -q 'UNIT IN FLIGHT: "validateCredentials"' && pass "the unit in flight is announced" || fail "S32c unit not announced"
+  echo "$OUT" | grep -q "rejects empty email" && pass "the stated criteria come back with it" || fail "S32c criteria not echoed"
+  echo "$OUT" | grep -q "Do NOT hand over another unit" && pass "a second unit is forbidden while one is open" || fail "S32c concurrent units allowed"
   teardown_state "$tmp"
 
-  # 29g — the rules must forbid inferring the window from prose.
-  RULES="$PLUGIN_DIR/skills/socratic/rules/immersive.md"
-  grep -q "Never treat prose as a grant" "$RULES" && pass "rules forbid inferring a grant from prose" || fail "S29g prose rule missing"
-  grep -q -i "suggest" "$RULES" && pass "rules allow suggesting the command" || fail "S29g suggestion rule missing"
+  # 32d — HINT_META.handoff opens and closes the unit.
+  tmp=$(setup_state 32d)
+  set_level "$tmp" 3
+  fire_stop "$tmp" "dale" 'Arranquemos.
+<!-- HINT_META {"topic":"auth","correct":null,"hintLevel":3,"handoff":{"unit":"issueSession","criteria":["not guessable from the user id"]}} /HINT_META -->'
+  SDOC="$tmp/sessions/$(date -u +%Y-%m-%d).json"
+  node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")); process.exit((d.handoff && d.handoff.unit==="issueSession" && d.handoff.criteria.length===1)?0:1)' "$SDOC" \
+    && pass "HINT_META opens the handoff" || fail "S32d handoff not persisted"
+
+  # A second open must NOT overwrite: one unit at a time, and the first
+  # is the one the user is still working on.
+  fire_stop "$tmp" "seguimos" 'Otra mas.
+<!-- HINT_META {"topic":"auth","correct":null,"hintLevel":3,"handoff":{"unit":"otherThing","criteria":[]}} /HINT_META -->'
+  node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")); process.exit(d.handoff.unit==="issueSession"?0:1)' "$SDOC" \
+    && pass "a second open does not displace the unit in flight" || fail "S32d handoff overwritten"
+
+  fire_stop "$tmp" "aca esta" 'Cumple los criterios.
+<!-- HINT_META {"topic":"auth","correct":true,"hintLevel":3,"handoff":"close"} /HINT_META -->'
+  node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")); process.exit(d.handoff===undefined?0:1)' "$SDOC" \
+    && pass '"close" clears the unit' || fail "S32d close did not clear"
+
+  # A malformed handoff must degrade to "nothing changed hands", never
+  # cost the whole turn record.
+  BEFORE=$(node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")); process.stdout.write(String(d.turns.length))' "$SDOC")
+  fire_stop "$tmp" "x" 'Texto.
+<!-- HINT_META {"topic":"auth","correct":null,"hintLevel":3,"handoff":{"criteria":["no unit name"]}} /HINT_META -->'
+  AFTER=$(node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")); process.stdout.write(String(d.turns.length))' "$SDOC")
+  [[ "$AFTER" -gt "$BEFORE" ]] && pass "a malformed handoff still records the turn" || fail "S32d malformed handoff lost the turn"
+  node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")); process.exit(d.handoff===undefined?0:1)' "$SDOC" \
+    && pass "a handoff with no unit name is ignored" || fail "S32d nameless handoff accepted"
+  teardown_state "$tmp"
+
+  # 32e — the evaluation rules must carry their load-bearing sentences.
+  # These are the ones that stop "review" from decaying into "looks good".
+  RULES="$PLUGIN_DIR/skills/socratic/rules/handoff.md"
+  [[ -f "$RULES" ]] && pass "handoff.md exists" || fail "S32e handoff.md missing"
+  grep -q "Point at the line" "$RULES" && pass "evaluation demands a specific line" || fail "S32e line-pointing rule missing"
+  grep -q "Do not produce the corrected version" "$RULES" && pass "rewriting the fix is forbidden" || fail "S32e no-rewrite rule missing"
+  grep -q -i "softening" "$RULES" && pass "softening is named as a failure" || fail "S32e softening not named"
+  grep -q "copy your response into their editor" "$RULES" && pass "the litmus test is restated for prose" || fail "S32e litmus test missing"
+  grep -q -i "do not close the unit" "$RULES" && pass "a failed unit is handed back, not fixed" || fail "S32e hand-back rule missing"
+fi
+
+## S34 harness invariant: day keys are UTC, never local
+if should_run 34; then
+  header "S34 UTC day-key invariant"
+
+  # WHY THIS EXISTS. Five asserts once failed together with no code
+  # change behind them: the tests resolved session-file paths with
+  # `date` (LOCAL) while the scripts write them with toISOString()
+  # (UTC). At 22:34 local in a UTC-7 zone it was already the next day
+  # in UTC, so the scripts wrote one file and the tests read another.
+  # The failure window was 17:00 to midnight, every day, and it stayed
+  # latent for two phases because nobody ran the suite in that band.
+  #
+  # Asserting the invariant statically beats remembering to run the
+  # suite at the right hour — which is the only other way to catch it,
+  # and is not a plan.
+  # The pattern is written with character classes so this check cannot
+  # match its own source line — a self-match would make it fail forever
+  # and teach whoever inherits it to delete the check.
+  BAD=$(grep -n '[$](date [+]%Y-%m-%d' "$PLUGIN_DIR/tests/run-all.sh" || true)
+  [[ -z "$BAD" ]] && pass "no assert resolves a day key with local time" \
+    || fail "S34 local date used for a day key: $BAD"
+
+  BAD=$(grep -rn 'toLocaleDateString\|getFullYear()' "$SCRIPTS" --include=*.ts || true)
+  [[ -z "$BAD" ]] && pass "no script derives a day key from local time" \
+    || fail "S34 local date in scripts: $BAD"
+
+  # And the two producers must agree on the format.
+  KEY=$(bun run "$PLUGIN_DIR/tests/fixtures/daykey-probe.ts")
+  [[ "$KEY" == "$(date -u +%Y-%m-%d)" ]] && pass "Axis.dayKey matches date -u" \
+    || fail "S34 dayKey mismatch: $KEY vs $(date -u +%Y-%m-%d)"
+fi
+
+## S33 status: one control panel
+if should_run 33; then
+  header "S33 unified status"
+
+  # v0.4 answered "what is my setup?" across four places — the level, the
+  # mode, whether immersive was on, whether a scaffold window was open —
+  # and a user who wanted less help had to know which one to move. One
+  # axis, one panel.
+  tmp=$(setup_state 33); set_level "$tmp" 3
+  OUT=$(SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/status.ts" 2>&1)
+  echo "$OUT" | grep -q "level 3 — Architect" && pass "names the level and its role" || fail "S33 level line missing"
+  echo "$OUT" | grep -q "agent may create new files: 6 left today" && pass "shows the remaining budget" || fail "S33 budget missing"
+  echo "$OUT" | grep -q "may NOT edit files that already exist" && pass "states the authorship boundary" || fail "S33 boundary missing"
+  echo "$OUT" | grep -q "handoff by unit" && pass "shows the handoff unit" || fail "S33 handoff missing"
+  echo "$OUT" | grep -q "episode: none" && pass "reports no episode" || fail "S33 episode line missing"
+  echo "$OUT" | grep -q "^autonomy" && pass "includes the autonomy report" || fail "S33 autonomy section missing"
+  echo "$OUT" | grep -qi "mode:" && fail "S33 mode leaked into status" || pass "no mode line (it no longer exists)"
+  echo "$OUT" | grep -qi "immersive" && fail "S33 immersive leaked into status" || pass "no immersive line"
+
+  # An episode in flight shows up in exactly one place.
+  SDOC="$tmp/sessions/$(date -u +%Y-%m-%d).json"
+  node -e '
+    const fs=require("fs");
+    fs.writeFileSync(process.argv[1], JSON.stringify({
+      date: process.argv[2], turns: [],
+      feynman: { topic: "closures", started_at: "2026-09-01T10:00:00Z", gaps: ["x"] },
+      handoff: { unit: "validateCredentials", criteria: [], opened_at: "2026-09-01T10:00:00Z" },
+    }));' "$SDOC" "$(date -u +%Y-%m-%d)"
+  OUT=$(SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/status.ts" 2>&1)
+  echo "$OUT" | grep -q 'feynman teaching "closures"' && pass "shows an active feynman episode" || fail "S33 feynman not shown"
+  echo "$OUT" | grep -q 'unit in flight: "validateCredentials"' && pass "shows the unit in flight" || fail "S33 handoff not shown"
+
+  # An open escape is visible with its reason and remaining time.
+  SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/escape.ts" --reason "prod incident" --minutes 10 >/dev/null 2>&1
+  OUT=$(SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/status.ts" 2>&1)
+  echo "$OUT" | grep -q "escape OPEN" && pass "shows an open escape" || fail "S33 escape not shown"
+  echo "$OUT" | grep -q "prod incident" && pass "shows the escape reason" || fail "S33 escape reason missing"
+  teardown_state "$tmp"
+
+  # R6.5: the off ramp is ALWAYS reported by name. Keeping it out of the
+  # user docs discourages discovery; it does not license hiding the state
+  # from someone who already turned it on.
+  tmp=$(setup_state 33b); set_level "$tmp" 6
+  OUT=$(SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/status.ts" 2>&1)
+  echo "$OUT" | grep -q "level 6 — Autopilot" && pass "level 6 is reported by name" || fail "S33b L6 hidden from status"
+  echo "$OUT" | grep -q "the axis is OFF" && pass "level 6 says what it implies" || fail "S33b L6 implication missing"
+  echo "$OUT" | grep -q "levels 1-5" && pass "level 6 says where the axis lives" || fail "S33b way back missing"
+  teardown_state "$tmp"
+
+  # The kill switches own the whole output; there is nothing to add.
+  tmp=$(setup_state 33c); set_level "$tmp" 3
+  node -e 'const fs=require("fs"),p=process.argv[1];const d=JSON.parse(fs.readFileSync(p,"utf-8"));d.enabled=false;fs.writeFileSync(p,JSON.stringify(d));' "$tmp/profile.json"
+  SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/status.ts" 2>&1 | grep -q "DISABLED" && pass "disabled is reported plainly" || fail "S33c disabled not reported"
+  mv "$tmp/profile.json" "$tmp/profile.json.paused"
+  SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/status.ts" 2>&1 | grep -q "PAUSED" && pass "paused is reported plainly" || fail "S33c paused not reported"
+  teardown_state "$tmp"
 fi
 
 # ==========================================================================

@@ -26,6 +26,7 @@ import { HintState } from "./hint-state"
 import { Detector } from "./detector"
 import { Antipatterns } from "./antipatterns"
 import { StateIO } from "./state-io"
+import { Axis } from "./axis-state"
 import ALGORITHM_JSON from "../data/algorithm.json"
 
 interface HookInput {
@@ -43,6 +44,20 @@ interface HintMeta {
   reason?: string
   feynman_gap?: string | null
   user_wrote?: boolean
+  /**
+   * Either an object opening a handoff, or the string "close", or null.
+   * Typed loosely because it comes from the model and is validated at
+   * the use site — a malformed value must degrade to "no handoff", not
+   * throw and lose the whole turn record.
+   */
+  handoff?: unknown
+}
+
+/** The unit currently handed to the user. See build-context.ts. */
+interface HandoffState {
+  unit: string
+  criteria: string[]
+  opened_at: string
 }
 
 interface FeynmanState {
@@ -138,6 +153,7 @@ interface SessionDoc {
   last_calibration_eval_turn?: number
   feynman?: FeynmanState
   feynman_summaries?: FeynmanSummary[]
+  handoff?: HandoffState
 }
 
 interface PendingCalibration {
@@ -273,12 +289,45 @@ function extractHintMeta(agentText: string): HintMeta | null {
   return StateIO.parseJson<HintMeta | null>(body, StateIO.isHintMeta as StateIO.Guard<HintMeta>, null)
 }
 
-function loadProfile(): { level: number; mode: string } {
+function loadProfile(): { level: number } {
   const p = join(stateDir(), "profile.json")
   const data = readJson<Record<string, unknown>>(p, {})
-  const level = Math.min(5, Math.max(1, Number(data["global_level"]) || 3))
-  const mode = data["mode"] === "productive" ? "productive" : "learn"
-  return { level, mode }
+  return { level: Axis.readLevel(data["global_level"]) }
+}
+
+/**
+ * Open, close, or leave the handed-over unit alone.
+ *
+ * Deliberately forgiving about the payload: it is model-authored, and a
+ * malformed handoff must degrade to "nothing changed hands" rather than
+ * throw and cost the whole turn record. Deliberately strict about one
+ * thing — a unit with no name is not a handoff, because the entire point
+ * is that the user knows which piece is theirs.
+ *
+ * An open handoff is NOT overwritten by a second open. The protocol is
+ * one unit at a time; if the model hands over a second while the first
+ * is unreviewed, the first one is what the user is still working on.
+ */
+function applyHandoff(doc: SessionDoc, raw: unknown): void {
+  if (raw === undefined || raw === null) return
+
+  if (typeof raw === "string") {
+    if (raw.trim().toLowerCase() === "close") delete doc.handoff
+    return
+  }
+
+  if (typeof raw !== "object" || Array.isArray(raw)) return
+  const obj = raw as Record<string, unknown>
+  const unit = typeof obj["unit"] === "string" ? obj["unit"].trim() : ""
+  if (!unit) return
+  if (doc.handoff) return
+
+  const criteriaRaw = obj["criteria"]
+  const criteria = Array.isArray(criteriaRaw)
+    ? criteriaRaw.filter((c): c is string => typeof c === "string" && c.trim().length > 0).map((c) => c.trim())
+    : []
+
+  doc.handoff = { unit, criteria, opened_at: new Date().toISOString() }
 }
 
 function loadSessionDoc(): SessionDoc {
@@ -503,6 +552,12 @@ function main(): void {
     }
   }
 
+  // Handoff continuity. The model declares it in HINT_META; without a
+  // persisted unit the next turn cannot tell whether the agent is still
+  // waiting on the user, and the protocol quietly degrades into "frame
+  // everything, then chat".
+  applyHandoff(doc, meta?.handoff)
+
   if (!doc.hint_state) {
     doc.hint_state = HintState.createInitialState(HintState.clampUserLevel(level))
   }
@@ -542,6 +597,20 @@ function main(): void {
     //
     // User-level changes (manual /level N or /accept) during diagnostic
     // clear it: the target is no longer meaningful.
+    // R6.2: no calibration on the off ramp. There is no evidence to
+    // gather about someone who is not being asked for anything — every
+    // turn at level 6 would read as a trivially correct one and the
+    // weighted average would drift on noise. A stale diagnostic from
+    // before the switch is cleared on the way in.
+    // The write must happen on this path too: last_active and
+    // last_user_message_length are not calibration state, and skipping
+    // them here would silently stop updating the profile at level 6.
+    if (Axis.isOffRamp(level)) {
+      delete profile["pending_diagnostic"]
+      writeJson(profilePath, profile)
+      return
+    }
+
     const existingDiag = profile["pending_diagnostic"] as PendingDiagnostic | undefined
     if (existingDiag && existingDiag.target_level !== level + 1 && existingDiag.target_level !== level) {
       delete profile["pending_diagnostic"]

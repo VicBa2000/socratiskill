@@ -1,7 +1,7 @@
 ---
 name: socratic
-description: Adaptive socratic mentor entry point. Invoked as /socratiskill:socratic to view the current pedagogical profile, change level/mode, or inspect which rules are active. For automatic per-turn injection, the plugin's UserPromptSubmit hook handles it outside this skill.
-argument-hint: "[status | on | off | pause | resume | calibrate | level <1-5> | mode <learn|productive> | immersive [on|<minutes>|off|status] | unlock <reason> | scaffold [<N>|status|close] | drill [analyze <file>|build|done] | hint | faster | slower | challenge | accept | teach <topic> | endteach | review | journal [today|week|month] | reset [force]]"
+description: Adaptive socratic mentor entry point. Invoked as /socratiskill:socratic to view the current level on the pedagogical axis, change it, or inspect which rules are active. For automatic per-turn injection, the plugin's UserPromptSubmit hook handles it outside this skill.
+argument-hint: "[status | on | off | pause | resume | calibrate | level <1-5> | ship <reason> [minutes] | drill [analyze <file>|build|done] | hint | faster | slower | challenge | accept | teach <topic> | endteach | review | journal [today|week|month] | reset [force]]"
 allowed-tools: [Read, Write, Bash]
 ---
 
@@ -34,23 +34,12 @@ climbing two directories up from this SKILL.md and appending
 The user invokes `/socratiskill:socratic $ARGUMENTS`. Dispatch by the
 first word:
 
-- **no arguments** or `status` -> Respond with a profile snapshot:
-  ```
-  enabled: <true|false>
-  level:   <global_level> (<role for the level>)
-  mode:    <learn|productive>
-  immersive: <ON (<N> min left) | ON (no timebox) | off>
-  speed:   <comprehension_speed>
-  copy:    <copy_tendency>
-  streak:  <streak_days> days
-  calibrated: <true|false>
-  ```
-  For the `immersive` line, read `profile.immersive`. It is `off` when
-  the key is absent, when `active` is not true, or when `expires_at` is
-  in the past (an elapsed timebox is off even though the flag still
-  says true — the hook clears it on the next turn).
-  If `enabled` is `false`, append: `(hooks installed but skill inactive
-  — run /socratiskill:socratic on to re-enable)`.
+- **no arguments** or `status` -> Run
+  `bun run <plugin-root>/scripts/status.ts` and show stdout **verbatim**.
+  Do NOT reformat it, do not summarize it, and do not add commentary to
+  the autonomy numbers — no congratulation, no softening of a low count,
+  no goals. An honest number the user can act on is the product.
+  Exit 3 = no profile; show stderr verbatim.
 
 - `on` -> Activate the skill: write `enabled: true` to profile.json.
   Starting next turn, the UserPromptSubmit hook will inject SOCRATIC
@@ -84,74 +73,44 @@ first word:
   twice in a row is a no-op the second time.
 
 - `level <1-5>` -> Update `global_level` in `~/.claude/socratic/profile.json`.
-  Validate range. Respond:
+  Respond:
   ```
   level updated: <old> -> <new> (<role>)
   ```
-  If out of range (1-5), respond `invalid level: <N>` and write nothing.
+  Accept 1, 2, 3, 4 and 5. Also accept 6 if the user types it, without
+  offering it and without commenting on the choice. For anything else,
+  respond `invalid level: <N>` listing `1-5`, and write nothing.
 
-- `mode <learn|productive>` -> Update `mode` in profile.json. Validate
-  that it is one of the two values. Respond:
-  ```
-  mode updated: <old> -> <new>
-  ```
-
-- `immersive [on|<minutes>|off|status]` -> Toggle the immersive
-  operating mode: a third axis, orthogonal to level and mode, in which
-  **the agent does not write code at all** — the user does, and the
-  agent coaches up the immersive ladder. Deliberate training against
-  skill atrophy from agent-driven development.
-  Dispatch by the second word:
-    - `immersive on`      -> no timebox, runs until `immersive off`.
-    - `immersive <N>`     -> N minutes, then it ends by itself.
-    - `immersive off`     -> end now and print the session summary.
-    - `immersive status`  -> elapsed / remaining / unlocks used.
-  Run `bun run <plugin-root>/scripts/immersive.ts` with `--on
-  [--minutes N]`, `--off`, or `--status` and show stdout verbatim.
-  Bare `immersive` with no second word defaults to `status`.
-  Exit 2 = bad arguments, exit 3 = no profile / paused; show stderr
-  verbatim in both cases.
-
-- `unlock <reason>` -> Temporarily stand the immersive gate down so you
-  can write code again. Requires immersive mode to be active and a
-  non-empty reason. Defaults to 10 minutes; `unlock <N> <reason>` sets
-  N minutes explicitly. Run `bun run <plugin-root>/scripts/immersive.ts
-  --unlock --reason "<reason>" [--minutes N]` and show stdout verbatim.
-  **Do not editorialize when the user unlocks.** No "are you sure", no
-  reminder about their goals, no disappointment. The escape hatch exists
-  because real work has real deadlines; the log is the accountability,
-  not your commentary.
-
-- `scaffold [<N> | status | close]` -> Open a window in which the agent
-  may CREATE files that do not exist yet — the skeleton of a new
-  project, page or module. Requires immersive mode (exit 2 otherwise).
-  Defaults to a per-level file count from `data/algorithm.json`;
-  `scaffold 8` overrides it. The window closes on whichever comes
-  first: files exhausted, minutes elapsed, or the immersive session
-  ending.
-  Run `bun run <plugin-root>/scripts/immersive.ts` with `--scaffold
-  [--files N]`, `--scaffold-status`, or `--scaffold-close`, and show
-  stdout verbatim.
-  **You may suggest this command; you may never assume it.** A prose
-  request ("hagamos la landing") does not open the window — only the
-  command does. See `rules/immersive.md`.
+- `ship <reason> [minutes]` -> Open a logged escape: the agent writes
+  normally until it expires, then the level re-arms by itself. Defaults
+  to 10 minutes; `ship 25 "demo del viernes"` sets it explicitly.
+  A reason is REQUIRED — it is the whole accountability mechanism.
+  Run `bun run <plugin-root>/scripts/escape.ts "<reason>" [minutes]`
+  (or `--status` / `--end`) and show stdout verbatim.
+  **Do not editorialize when the user ships.** No "are you sure", no
+  reminder about their goals, no disappointment. Real work has real
+  deadlines, and a lock with no exit gets the plugin uninstalled. The
+  log is the accountability, not your commentary.
+  Exit 2 = no reason given, or nothing to escape from (level 1 and
+  level 6 already let the agent write); exit 3 = no profile.
 
 - `drill [analyze [<file>] | build | status | done | cancel]` ->
   Deliberate practice drawn from the user's own repo.
   - `drill analyze [<file>]` — the user is quizzed on existing code.
-    Works with or without immersive mode. With no path, the script
-    picks the file on rotation; **do not override that choice** and do
-    not suggest a different file.
+    Works at any level: reading was never the restricted half. With no
+    path, the script picks the file on rotation; **do not override that
+    choice** and do not suggest a different file.
   - `drill build` — the user implements a bounded task from scratch.
-    Requires immersive mode; the script exits 2 with instructions if it
-    is off.
+    Requires level 3 or higher; below that the agent writes the bodies
+    and the drill measures nothing. The script exits 2 with
+    instructions.
   - `drill status` / `drill done` / `drill cancel` — inspect, close (a
     build drill reports lines written), or abandon.
   Run `bun run <plugin-root>/scripts/drill.ts` with `--kind analyze
   [--file <path>]`, `--kind build`, `--status`, `--done`, or `--cancel`.
   Show stdout verbatim, then follow the protocol in `rules/drills.md`.
   Exit 2 = another drill is running, file not found, nothing drillable
-  found, or immersive required; show stderr verbatim.
+  found, or the level is too low; show stderr verbatim.
 
 - `calibrate` -> Run the initial calibration flow (self-assessment,
   1 question). See "Calibration flow" below.
@@ -232,36 +191,40 @@ first word:
 For anything else, respond:
 ```
 unknown subcommand: <args>
-valid: status | on | off | pause | resume | calibrate | level <1-5> | mode <learn|productive> | immersive [on|<minutes>|off|status] | unlock <reason> | scaffold [<N>|status|close] | drill [analyze <file>|build|done] | hint | faster | slower | challenge | accept | teach <topic> | endteach | review | journal [today|week|month] | reset [force]
+valid: status | on | off | pause | resume | calibrate | level <1-5> | ship <reason> [minutes] | drill [analyze <file>|build|done] | hint | faster | slower | challenge | accept | teach <topic> | endteach | review | journal [today|week|month] | reset [force]
 ```
 
-## Role reference (see rules/)
+## The axis (see rules/)
 
-Role names are loaded from `data/roles.json` and kept consistent across
-all consumers (this SKILL, `build-context.ts`, `accept-calibration.ts`):
+There is ONE pedagogical setting: the level. It answers one question —
+**how much of the work is the user's?** — and everything else follows.
+The contract lives in `data/levels.json` and is frozen in
+`unificacion.txt` §12.B. If a rules file contradicts that table, the
+table wins.
 
-- Level 1 (Novice) -> Live teacher. See `rules/level-1-teacher.md`.
-- Level 2 (Basic) -> Teacher with context. See `rules/level-2-guide.md`.
-- Level 3 (Intermediate) -> Pair programmer. See `rules/level-3-pair.md`.
-- Level 4 (Advanced) -> Code reviewer. See `rules/level-4-reviewer.md`.
-- Level 5 (Expert) -> Silent colleague. See `rules/level-5-silent.md`.
+- Level 1 -> Implementer. The agent implements; the user is questioned.
+  See `rules/level-1-implementer.md`.
+- Level 2 -> Framer. Structure and trivial bodies; the user writes the
+  load-bearing logic. See `rules/level-2-framer.md`.
+- Level 3 -> Architect. Skeletons and signatures; every body is the
+  user's. See `rules/level-3-architect.md`.
+- Level 4 -> Guide. Writes nothing; decomposes and points at prior art.
+  See `rules/level-4-guide.md`.
+- Level 5 -> Socratic. Writes nothing, directs nothing. Asks.
+  See `rules/level-5-socratic.md`.
 
-Mode rules are in `rules/mode-learn.md` and `rules/mode-productive.md`.
+Shared rules: `rules/axis.md` (the role), `rules/ladder.md` (the rungs),
+`rules/handoff.md` (giving the user a unit and evaluating what returns).
 
 ## Execution instructions
 
 1. Parse `$ARGUMENTS`. With no arguments, treat as `status`.
 2. Read `~/.claude/socratic/profile.json` with Read.
-3. For `status`, format and respond. For the `role` field per level,
-   use the table:
-   - 1 -> Live teacher
-   - 2 -> Teacher with context
-   - 3 -> Pair programmer
-   - 4 -> Code reviewer
-   - 5 -> Silent colleague
-4. For `level N` or `mode X`, validate and rewrite the full JSON with
-   the updated field (preserve all other fields). Use Write with the
-   complete JSON.
+3. For `status`, run `scripts/status.ts` and relay its stdout verbatim.
+   Do not rebuild the snapshot yourself — one renderer, one format.
+4. For `level N`, validate and rewrite the full JSON with the updated
+   field (preserve all other fields). Use Write with the complete JSON.
+   Role names for the response come from `data/levels.json`.
 5. Do not add extra text or emojis. Keep the response minimal and
    exactly in the specified format.
 6. For `hint`, `faster`, `slower`: invoke the script via Bash using
@@ -302,23 +265,14 @@ Mode rules are in `rules/mode-learn.md` and `rules/mode-productive.md`.
     other fields. Respond with the exact block from the subcommand
     section. Do not invoke any external script — this is a simple
     JSON mutation.
-14. For `immersive`: parse the SECOND word. `on` -> `--on`; a bare
-    number N -> `--on --minutes N`; `off` -> `--off`; `status` or
-    nothing -> `--status`. Anything else: respond
-    `unknown: immersive <word>` and invoke nothing. Show the script's
-    stdout verbatim and add no commentary of your own — the script's
-    output is already written for the user.
-15. For `unlock`: everything after the word `unlock` is the reason,
-    UNLESS the first token is a bare number — then it is the minute
-    count and the rest is the reason. Pass the reason double-quoted.
-    With no reason, do not invoke anything: respond
-    `unlock needs a reason, e.g. /socratiskill:socratic unlock prod hotfix`.
-    Exit 2 means immersive is not active; show stderr verbatim.
-16. For `scaffold`: parse the SECOND word. A bare number N ->
-    `--scaffold --files N`. `status` -> `--scaffold-status`. `close` ->
-    `--scaffold-close`. No second word -> `--scaffold`. Anything else:
-    respond `unknown: scaffold <word>` and invoke nothing.
-17. For `drill`: parse the SECOND word. `analyze` -> `--kind analyze`,
+14. For `ship`: everything after the word `ship` is the reason, UNLESS
+    the first token is a bare number — then it is the minute count and
+    the rest is the reason. Pass the reason double-quoted. With no
+    reason, do not invoke anything: respond
+    `ship needs a reason, e.g. /socratiskill:socratic ship prod hotfix`.
+    Show the script's stdout verbatim and add NO commentary of your own,
+    in either direction.
+15. For `drill`: parse the SECOND word. `analyze` -> `--kind analyze`,
     plus `--file "<third word>"` if a path was given. `build` ->
     `--kind build`. `status`/`done`/`cancel` -> the matching flag. No
     second word -> `--status`. Anything else: respond
@@ -326,11 +280,8 @@ Mode rules are in `rules/mode-learn.md` and `rules/mode-productive.md`.
     After a successful start, read the target file with Read before your
     first question — you cannot grade an answer about code you have not
     read.
-18. For `status`: in addition to the standard snapshot, read the
-    `enabled` field. If absent or true, the first line is
-    `enabled: true`. If false, print `enabled: false` and append the
-    notice after the status lines: `(hooks installed but skill
-    inactive — run /socratiskill:socratic on to re-enable)`.
+16. For `status`: the script owns the whole snapshot, including the
+    disabled and paused notices. Relay it verbatim and add nothing.
 
 ## Calibration flow
 
@@ -354,11 +305,17 @@ When `$ARGUMENTS == "calibrate"`:
    To adapt my pedagogical style, I need to know your programming
    experience level. Pick the option that best describes you:
 
-     1. Novice       — Starting out. I need detailed explanations.
-     2. Basic        — I know fundamentals but need frequent guidance.
-     3. Intermediate — I code regularly. I solve problems with some help.
-     4. Advanced     — Solid experience. I prefer code review and challenges.
-     5. Expert       — Fluent in multiple technologies. Silent colleague, that's it.
+   The level decides HOW MUCH OF THE WORK IS YOURS — not how much I
+   explain. Higher means you write more of it, and I do less.
+
+     1. Implementer — I write the code and question you as I go.
+     2. Framer      — I frame the structure and the trivial parts;
+                      you write the logic that actually decides things.
+     3. Architect   — I write skeletons and signatures; every body is
+                      yours.
+     4. Guide       — I write nothing. I break the problem down and
+                      point you at what you already solved.
+     5. Socratic    — I write nothing and direct nothing. I ask.
 
    Respond with the number (1-5) or the level name.
    ```

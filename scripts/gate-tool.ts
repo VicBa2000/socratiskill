@@ -1,26 +1,39 @@
 /**
  * gate-tool.ts — engine of the PreToolUse hook.
  *
- * While immersive mode is active the agent does not write code; the user
- * does. Every other rule in this plugin is a soft instruction injected as
- * text and obeyed at the model's discretion — this one is not. A level-1
- * turn once wrote 378 lines despite explicit limits (see cambios.txt,
- * Tarea 10.A.2), so "write nothing at all" cannot rest on obedience.
+ * Above level 1 the agent does not author the code; the user does. Every
+ * other rule in this plugin is a soft instruction injected as text and
+ * obeyed at the model's discretion — this one is not. A level-1 turn once
+ * wrote 378 lines despite explicit limits (cambios.txt, Tarea 10.A.2), so
+ * "you do not write this" cannot rest on obedience.
  *
- * Claude Code lets a PreToolUse hook refuse a call outright by printing
- * a permissionDecision of "deny" (validated empirically, Tarea I.0.1).
- * The tool never runs and the model receives our reason verbatim.
+ * Claude Code lets a PreToolUse hook refuse a call outright by printing a
+ * permissionDecision of "deny" (validated empirically, Tarea I.0.1). The
+ * tool never runs and the model receives our reason verbatim.
+ *
+ * THREE LAYERS, in the order they fire:
+ *
+ *   1. CREATE vs EDIT — the only authorship boundary that can be drawn
+ *      without anyone's opinion. Editing an existing file is implementing.
+ *   2. SHAPE — a created file must look like a skeleton, not an
+ *      implementation (shape-check.ts). This is what closes the hole that
+ *      the v0.4 scaffold window only bounded by being short-lived.
+ *   3. BUDGET — a daily cap on created files, bounding the blast radius
+ *      when the first two are fooled.
  *
  * Fail-open everywhere: any unexpected state allows the call. A gate that
- * misfires and blocks real work gets the whole plugin uninstalled.
+ * misfires and blocks real work gets the whole plugin uninstalled. L1, the
+ * off ramp and an open escape all disarm it by construction.
  */
 
 import { readFileSync, existsSync } from "node:fs"
 import { homedir } from "node:os"
 import { join, resolve } from "node:path"
 import { HintState } from "./hint-state"
-import { Immersive } from "./immersive-state"
+import { Axis } from "./axis-state"
+import { ShapeCheck } from "./shape-check"
 import { StateIO } from "./state-io"
+import LEVELS_JSON from "../data/levels.json"
 
 interface HookInput {
   tool_name?: string
@@ -29,20 +42,23 @@ interface HookInput {
   cwd?: string
 }
 
-/** Tools that put code on disk. Denied outright while immersive. */
+/** Tools that put code on disk. */
 const WRITE_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"])
 
 /** Delegation loophole: a subagent writing on the agent's behalf. */
 const DELEGATION_TOOLS = new Set(["Agent", "Task"])
 
+/** Tools that can only ever touch a file that already exists. */
+const EDIT_ONLY_TOOLS = new Set(["Edit", "MultiEdit", "NotebookEdit"])
+
 export namespace Gate {
   export interface Verdict {
     allow: boolean
     reason?: string
-    /** Which rule fired, for the telemetry in Fase 4. */
+    /** Which rule fired, for the telemetry. */
     rule?: string
-    /** Set when the allow consumed a scaffold slot; caller must persist. */
-    scaffoldLines?: number
+    /** Set when the allow charged a file against the daily budget. */
+    chargedLines?: number
   }
 
   /**
@@ -58,11 +74,16 @@ export namespace Gate {
   /**
    * Shell commands that write files, i.e. Bash used as an editor.
    *
-   * Deliberately conservative: the user NEEDS Bash to run their own tests,
-   * git, linters and builds while they work. Only unmistakable
-   * write-to-file vectors are listed. Redirections to /dev/null and to
-   * file descriptors (2>&1, >&2) are excluded — those are plumbing, not
-   * authoring.
+   * Deliberately conservative — WHEN IN DOUBT, ALLOW. The user NEEDS Bash
+   * to run their own tests, git, linters and builds while they work, and a
+   * false positive here blocks exactly the activity the axis exists to
+   * produce. Only unmistakable write-to-file vectors are listed.
+   * Redirections to /dev/null and to file descriptors (2>&1, >&2) are
+   * excluded — those are plumbing, not authoring.
+   *
+   * NOTE the opposite polarity in shape-check.ts, which is deliberately
+   * RESTRICTIVE. Not an inconsistency: there a false positive only costs
+   * the agent a retry. Do not harmonize them.
    */
   const WRITE_PATTERNS: Array<{ id: string; re: RegExp }> = [
     // `> file` / `>> file`, but not `>/dev/null`, `2>&1`, `>&2`
@@ -98,9 +119,9 @@ export namespace Gate {
   /**
    * The plugin's own state is not the user's code. `socratic off`,
    * `level N` and `challenge` all mutate profile.json through the Write
-   * tool, so gating that path would let immersive mode block the very
-   * commands that turn it off — a lock whose key is inside the locked
-   * room. The escape hatches must never depend on the gate's goodwill.
+   * tool, so gating that path would let the axis block the very commands
+   * that change it — a lock whose key is inside the locked room. The
+   * escape hatches must never depend on the gate's goodwill.
    */
   function isPluginState(toolInput: Record<string, unknown>, stateDir: string): boolean {
     const target = toolInput["file_path"] ?? toolInput["notebook_path"]
@@ -113,69 +134,48 @@ export namespace Gate {
     return t === dir || t.startsWith(dir + "/")
   }
 
-  export function decide(
-    toolName: string,
-    toolInput: Record<string, unknown>,
-    rung: number,
-    stateDir: string,
-    scaffold?: Immersive.Scaffold | null,
-  ): Verdict {
+  export interface DecideInput {
+    toolName: string
+    toolInput: Record<string, unknown>
+    contract: Axis.GateContract
+    rung: number
+    stateDir: string
+    shapeConfig?: ShapeCheck.Config
+  }
+
+  export function decide(input: DecideInput): Verdict {
+    const { toolName, toolInput, contract, rung, stateDir } = input
+    const shapeConfig = input.shapeConfig ?? ShapeCheck.DEFAULT_CONFIG
+
     if (isPluginState(toolInput, stateDir)) return { allow: true }
 
-    // Scaffold window: the user has explicitly conceded that the agent
-    // may create the skeleton of something new.
-    //
-    // The line is CREATE vs EDIT, and it is the only one the gate can
-    // draw without adjudicating. "Is this boilerplate or is this the
-    // code that teaches them?" is a judgment call, and a judgment call
-    // handed to the model is one the model's helpfulness gradient will
-    // widen until the window swallows the whole feature. Whether a file
-    // already exists is a fact.
-    if (scaffold && toolName === "Write") {
+    const r = Axis.rung(rung)
+    const coach =
+      `You are at level ${contract.level} (${contract.label}), rung ${rung} (${r.name}). ${r.directive} ` +
+      "Do not paste a code block for them to copy either — that is the same failure with extra steps."
+
+    if (toolName === "Write") {
       const target = toolInput["file_path"]
       if (typeof target === "string" && target.length > 0) {
-        if (existsSync(target)) {
-          return {
-            allow: false,
-            rule: "scaffold:existing-file",
-            reason:
-              `IMMERSIVE MODE: the scaffold window lets you CREATE files that do not exist yet — ${target} already does, so writing it is an edit, and editing is implementing. ` +
-              "Tell the user what needs to change in it and let them make the change.",
-          }
-        }
-        const content = typeof toolInput["content"] === "string" ? (toolInput["content"] as string) : ""
-        const lines = countLines(content)
-        if (lines > scaffold.max_lines_per_file) {
-          return {
-            allow: false,
-            rule: "scaffold:too-many-lines",
-            reason:
-              `IMMERSIVE MODE: ${lines} lines exceeds the ${scaffold.max_lines_per_file}-line scaffold limit for a single file. ` +
-              "A scaffold is a skeleton, not an implementation — create the structure and leave the bodies for the user.",
-          }
-        }
-        return { allow: true, rule: "scaffold:create", scaffoldLines: lines }
+        return decideWrite(target, toolInput, contract, coach, shapeConfig)
       }
     }
 
-    const r = Immersive.rung(rung)
-    const coach =
-      `You are at rung ${rung} (${r.name}) of the immersive ladder. ${r.directive} ` +
-      "Do not paste a code block for them to copy either — that is the same failure with extra steps."
+    if (EDIT_ONLY_TOOLS.has(toolName)) {
+      return {
+        allow: false,
+        rule: "edit-existing",
+        reason:
+          `LEVEL ${contract.level}: ${toolName} is blocked. It only applies to a file that already exists, and changing existing code is implementing — that half is the user's. ` +
+          coach,
+      }
+    }
 
     if (WRITE_TOOLS.has(toolName)) {
-      // Edit/MultiEdit stay blocked even with a window open: they only
-      // apply to files that already exist, which is implementing.
-      const scaffoldNote = scaffold
-        ? ` A scaffold window is open, but it only covers CREATING new files with Write — ${toolName} modifies what is already there.`
-        : " If they have a real deadline, tell them about /socratiskill:socratic unlock <reason> and drop it."
       return {
         allow: false,
         rule: "write-tool",
-        reason:
-          `IMMERSIVE MODE: ${toolName} is blocked. The user is deliberately training their own coding ability — they write the code this session, you coach. ` +
-          coach +
-          scaffoldNote,
+        reason: `LEVEL ${contract.level}: ${toolName} is blocked. ` + coach,
       }
     }
 
@@ -184,7 +184,7 @@ export namespace Gate {
         allow: false,
         rule: "delegation",
         reason:
-          "IMMERSIVE MODE: delegating to a subagent is blocked — a subagent writing the code is the same as you writing it. " +
+          `LEVEL ${contract.level}: delegating to a subagent is blocked — a subagent writing the code is the same as you writing it. ` +
           coach,
       }
     }
@@ -197,7 +197,7 @@ export namespace Gate {
           allow: false,
           rule: `bash:${hit}`,
           reason:
-            `IMMERSIVE MODE: this Bash command writes to a file (${hit}), which is Write with extra steps. ` +
+            `LEVEL ${contract.level}: this Bash command writes to a file (${hit}), which is Write with extra steps. ` +
             "Running the user's tests, git, builds and linters is allowed and encouraged — authoring files is not. " +
             coach,
         }
@@ -206,10 +206,117 @@ export namespace Gate {
 
     return { allow: true }
   }
+
+  function decideWrite(
+    target: string,
+    toolInput: Record<string, unknown>,
+    contract: Axis.GateContract,
+    coach: string,
+    shapeConfig: ShapeCheck.Config,
+  ): Verdict {
+    // LAYER 1 — create vs edit. Whether a file already exists is a fact,
+    // which is the entire reason this is the boundary: "is this
+    // boilerplate or the code that teaches them?" is a judgment call, and
+    // a judgment call handed to the model is one its helpfulness gradient
+    // widens until it swallows the feature.
+    if (existsSync(target)) {
+      return {
+        allow: false,
+        rule: "write:existing-file",
+        reason:
+          `LEVEL ${contract.level}: ${target} already exists, so writing it is an edit, and editing is implementing. ` +
+          "Tell the user what needs to change in it and let them make the change. " +
+          coach,
+      }
+    }
+
+    if (!contract.mayCreateFiles) {
+      return {
+        allow: false,
+        rule: "write:no-authorship",
+        reason: `LEVEL ${contract.level}: you do not author files at this level. ` + coach,
+      }
+    }
+
+    // LAYER 3 (checked before shape so an exhausted budget gives the
+    // clearer message) — the daily cap.
+    if (contract.remainingFiles !== null && contract.remainingFiles <= 0) {
+      return {
+        allow: false,
+        rule: "write:budget-exhausted",
+        reason:
+          `LEVEL ${contract.level}: the daily budget for new files is spent. It resets tomorrow. ` +
+          "Say so plainly with the count and move on — do not look for another way to put this on disk. " +
+          coach,
+      }
+    }
+
+    const content = typeof toolInput["content"] === "string" ? (toolInput["content"] as string) : ""
+    const lines = countLines(content)
+    if (lines > contract.maxLinesPerFile) {
+      return {
+        allow: false,
+        rule: "write:too-many-lines",
+        reason:
+          `LEVEL ${contract.level}: ${lines} lines exceeds the ${contract.maxLinesPerFile}-line cap for a single new file. ` +
+          "A scaffold is a skeleton, not an implementation — create the structure and leave the bodies for the user.",
+      }
+    }
+
+    // LAYER 2 — shape. Markup has no bodies to leave empty, so an HTML or
+    // JSON skeleton is legitimately all content and is judged by the line
+    // cap alone.
+    const allowance = contract.statementAllowance
+    if (allowance !== null && ShapeCheck.classifyFile(target, shapeConfig) === "code") {
+      const statements = ShapeCheck.countStatements(content, shapeConfig)
+      if (statements > allowance) {
+        const samples = ShapeCheck.statementSamples(content, 3, shapeConfig)
+        const shown = samples.length > 0 ? ` Offending lines start with: ${samples.map((s) => `"${s}"`).join(", ")}.` : ""
+        return {
+          allow: false,
+          rule: "write:shape",
+          reason:
+            `LEVEL ${contract.level}: this file has ${statements} executable statement(s); the limit for a new file at this level is ${allowance}. ` +
+            "Create the SHAPE — imports, types, signatures, and a TODO in each body saying what it must do — and stop there. " +
+            "The empty function the user has to fill is the entire point." +
+            shown,
+        }
+      }
+    }
+
+    return { allow: true, rule: "write:create", chargedLines: lines }
+  }
 }
 
 function stateDir(): string {
   return process.env["SOCRATIC_STATE_DIR"] ?? join(homedir(), ".claude", "socratic")
+}
+
+function levelTable(): Axis.LevelTable | null {
+  try {
+    return (LEVELS_JSON as { levels?: Axis.LevelTable }).levels ?? null
+  } catch {
+    return null
+  }
+}
+
+function shapeConfig(): ShapeCheck.Config {
+  try {
+    const sc = (LEVELS_JSON as { shape_check?: Record<string, unknown> }).shape_check
+    if (!sc) return ShapeCheck.DEFAULT_CONFIG
+    return {
+      codeExtensions: (sc["code_extensions"] as string[]) ?? ShapeCheck.DEFAULT_CONFIG.codeExtensions,
+      markupExtensions: (sc["markup_extensions"] as string[]) ?? ShapeCheck.DEFAULT_CONFIG.markupExtensions,
+      markers: (sc["markers"] as string[]) ?? ShapeCheck.DEFAULT_CONFIG.markers,
+    }
+  } catch {
+    return ShapeCheck.DEFAULT_CONFIG
+  }
+}
+
+function maxLines(): number {
+  const n = Number((LEVELS_JSON as { max_lines_per_new_file?: unknown }).max_lines_per_new_file)
+  return Number.isFinite(n) && n > 0 ? n : 80
 }
 
 function main(): void {
@@ -242,24 +349,32 @@ function main(): void {
 
   if (profile["enabled"] === false) return
 
-  const state = Immersive.isState(profile["immersive"]) ? profile["immersive"] : null
   const now = new Date()
-  if (!Immersive.isActive(state, now)) return
+  const table = levelTable()
+  const level = Axis.readLevel(profile["global_level"])
+  const budget = profile["axis_budget"] as Axis.Budget | undefined
+  const escapes = profile["escapes"] as Axis.Escape[] | undefined
 
-  // A logged unlock is a deliberate escape hatch, and while it lasts the
-  // gate stands down completely. Real work has real deadlines; a lock with
-  // no exit is a lock that gets uninstalled.
-  if (Immersive.isUnlocked(state, now)) return
+  const contract = Axis.gateContract(level, budget, escapes, now, maxLines(), table)
 
-  const level = Math.min(5, Math.max(1, Number(profile["global_level"]) || 3))
-  const rung = readRung(level)
+  // Disarmed by L1 (the agent is supposed to write), by the off ramp (the
+  // axis is off), or by an open escape. All three are the same decision
+  // from the axis's point of view, so they are one branch.
+  if (!contract.armed) return
 
-  const scaffold = Immersive.isScaffoldOpen(state, now) ? state!.scaffold! : null
+  const rung = Axis.clampRung(level, readRung(level), table)
 
-  const verdict = Gate.decide(toolName, input.tool_input ?? {}, rung, stateDir(), scaffold)
+  const verdict = Gate.decide({
+    toolName,
+    toolInput: input.tool_input ?? {},
+    contract,
+    rung,
+    stateDir: stateDir(),
+    shapeConfig: shapeConfig(),
+  })
 
   if (verdict.allow) {
-    if (verdict.scaffoldLines !== undefined) consumeScaffoldSlot(verdict.scaffoldLines)
+    if (verdict.chargedLines !== undefined) chargeBudget(verdict.chargedLines)
     return
   }
 
@@ -275,29 +390,30 @@ function main(): void {
 }
 
 /**
- * Charge one file against the open scaffold window.
+ * Charge one file against today's budget.
  *
  * This is the one place the gate writes state, so it takes the same
  * profile lock every other writer uses. Two caveats, both deliberate:
  *
  *  - It counts at ALLOW time, not at completion. If the write fails
- *    afterwards the window is charged for a file that never landed.
- *    That error runs against the user (it subtracts lines they did not
- *    receive), and closing the gap would mean a fourth hook firing on
- *    every tool call — not worth it for a rare case.
- *  - It is best-effort: if the bookkeeping throws, the write still
- *    goes through. A gate that blocks real work because it could not
- *    update a counter would be worse than one that miscounts.
+ *    afterwards the budget is charged for a file that never landed. That
+ *    error runs against the user, and closing the gap would mean a fourth
+ *    hook firing on every tool call — not worth it for a rare case.
+ *  - It is best-effort: if the bookkeeping throws, the write still goes
+ *    through. A gate that blocks real work because it could not update a
+ *    counter would be worse than one that miscounts.
+ *
+ * A DENIAL never charges. Being told no is not a use of the budget.
  */
-function consumeScaffoldSlot(lines: number): void {
+function chargeBudget(lines: number): void {
   const p = join(stateDir(), "profile.json")
   try {
     StateIO.withLock(`${p}.lock`, () => {
+      // Re-read inside the lock: build-context and record-turn mutate the
+      // same file, and a stale copy would silently drop their writes.
       const fresh = JSON.parse(readFileSync(p, "utf-8")) as Record<string, unknown>
-      const st = fresh["immersive"] as Immersive.State | undefined
-      if (!st || !st.scaffold) return
-      st.scaffold.files_used = (Number(st.scaffold.files_used) || 0) + 1
-      st.scaffold.lines_written = (Number(st.scaffold.lines_written) || 0) + lines
+      const current = fresh["axis_budget"] as Axis.Budget | undefined
+      fresh["axis_budget"] = Axis.chargeFile(current, new Date(), lines)
       StateIO.writeJsonAtomic(p, fresh)
     })
   } catch {
@@ -319,7 +435,7 @@ function readRung(level: number): number {
       /* fall through */
     }
   }
-  return HintState.getInitialHintLevel(HintState.clampUserLevel(level))
+  return HintState.getInitialHintLevel(HintState.clampUserLevel(Axis.clampToAxis(level)))
 }
 
 main()

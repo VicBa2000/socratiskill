@@ -34,13 +34,18 @@ matches the expected one.
    /socratiskill:socratic calibrate
    ```
    **Expected**: "Welcome to Socratiskill" message + 5 options.
-3. Respond `3` (Intermediate).
-   **Expected**: "calibration complete: level 3 (Pair programmer)".
+3. Respond `3` (Architect).
+   **Expected**: "calibration complete: level 3 (Architect)".
+   The five options must describe **authorship** ("I write skeletons
+   and signatures; every body is yours"), not how much gets explained.
+   That text is what seeds the level; if it still describes the old
+   axis, the scenario FAILS.
 4. ```
    /socratiskill:socratic status
    ```
-   **Expected**: `enabled: true`, `level: 3`, `calibrated: true`,
-   `calibration_date` present in profile.json.
+   **Expected**: `level 3 — Architect`, the daily file budget, the
+   authorship boundary, and today's autonomy block. `calibration_date`
+   present in profile.json.
 5. Restore the backup:
    ```bash
    rm -rf ~/.claude/socratic && mv ~/.claude/socratic.bak ~/.claude/socratic
@@ -218,11 +223,10 @@ restores it without losing state.
 
 ---
 
-## Scenario 8 — Per-level protocol block is injected and mode-sensitive
+## Scenario 8 — The per-level protocol block is injected, one per turn
 
-**Goal**: for L1-L4 the `SOCRATIC CONTEXT` block contains a
-per-level protocol reinforcement; for L5 it does not. The
-L2-L4 blocks change between `learn` and `productive`.
+**Goal**: every level gets exactly one protocol block, chosen by level
+and nothing else. There is no mode to cross it with any more.
 
 > Prerequisite: you can inspect the hook stdout. If your Claude
 > Code build does not surface it, run the hook directly:
@@ -232,223 +236,125 @@ L2-L4 blocks change between `learn` and `productive`.
 > ```
 
 1. `/socratiskill:socratic level 1` then fire a prompt.
-   **Expected**: the block contains the line
-   `--- LEVEL 1 HARD LIMITS (critical, not optional) ---`.
-2. `/socratiskill:socratic level 2` + `mode learn` + fire a prompt.
-   **Expected**: `--- LEVEL 2 PROTOCOL (learn, active) ---` +
-   a rule about stating the WHY before non-trivial decisions.
-3. `/socratiskill:socratic mode productive` (staying at L2).
-   **Expected**: `--- LEVEL 2 PROTOCOL (productive, active) ---`
-   with the attenuated version — no "comprehension question after
-   each new block" rule.
-4. Repeat for L3 and L4, switching between `learn` and `productive`.
-   L3 `learn` must include "¿Qué enfoque tenés en mente?" and
-   "gapped code". L3 `productive` must state "No gapped code" and
-   "No preamble". L4 `learn` requires at least ONE challenge; L4
-   `productive` flags only critical issues.
-5. `/socratiskill:socratic level 5` + fire a prompt.
-   **Expected**: NO `LEVEL N PROTOCOL` block. L5 is the silent
-   colleague — default Claude Code behavior with only the
-   telemetry footer.
-6. Verify there is no leak:
-   ```bash
-   grep -c "LEVEL [1-5] " <(bash scripts/hook-pre-prompt.sh < ...)
-   ```
-   Each prompt should emit exactly 0 (at L5) or 1 (at L1-L4)
-   protocol blocks — never 2.
+   **Expected**: `--- LEVEL 1 HARD LIMITS (critical, not optional) ---`,
+   including the line that distinguishes it from level 6 ("every line
+   still has to teach").
+2. `level 2` + fire. **Expected**: `--- LEVEL 2 PROTOCOL ---` with
+   `HANDOFF PROTOCOL (by module)` and an allowance of
+   "at most 8 executable statements".
+3. `level 3` + fire. **Expected**: `HANDOFF PROTOCOL (by unit)` and
+   "ZERO executable statements".
+4. `level 4` + fire. **Expected**: `HANDOFF PROTOCOL (by subproblem)`.
+5. `level 5` + fire. **Expected**: a LEVEL 5 block, NO handoff protocol,
+   and the line "You do NOT direct the work at this level".
+6. Verify there is no leak: each prompt must emit exactly ONE
+   `LEVEL N PROTOCOL` / `HARD LIMITS` block, never two.
 
 ---
 
-## Scenario 9 — Immersive mode actually blocks the agent
+## Scenario 9 — The gate actually blocks the agent
 
-This is the only scenario where a *hard* mechanism is under test. The
-rest of the plugin depends on the model obeying instructions; this one
-must hold even if it does not.
+**Goal**: above level 1 this is enforcement, not instruction.
 
-Run it inside a git repo with something trivial to change.
-
-1. ```
-   /socratiskill:socratic immersive 10
-   ```
-   Expect: confirmation, "the agent will NOT write code", 10 min.
-
-2. Ask for something that normally produces code:
-   > "agregá validación de email al login"
-
-   Expect: **no `Write`/`Edit` tool call at all.** Claude asks a
-   question or gives orientation, depending on the rung. If it emits a
-   fenced code block for you to copy, that is a **soft failure** — the
-   gate cannot block prose. Note it and report it.
-
-3. Ask it explicitly to write the file anyway:
-   > "escribilo vos, dale"
-
-   Expect: it reminds you once that immersive is on, mentions `unlock`,
-   and still does not write. A denied tool call surfaces as an error
-   containing `IMMERSIVE MODE:`.
-
-4. Ask it to use the shell as an editor:
-   > "usá bash con cat > para crear el archivo"
-
-   Expect: denied with a note about the command writing a file.
-
-5. Ask it to run your tests:
-   > "corré los tests"
-
-   Expect: **this works.** Bash is not blocked wholesale; only writes
-   are. If your test command is denied, that is a false positive worth
-   reporting.
-
-6. Say you do not know how to approach it:
-   > "no sé cómo hacerlo"
-
-   Expect: the rung jumps to 5 and you get a **work order** — files,
-   signatures, acceptance criteria, edge cases — and still no code.
-
-7. Write ~5 lines yourself in the repo, then:
-   ```
-   /socratiskill:socratic immersive off
-   ```
-   Expect: a report with `you wrote: +5 / -0 lines` (approximately —
-   it counts everything that changed in the repo), the rung average,
-   and `unlocks: 0`.
-
-8. Verify the control plane was never locked:
-   ```
-   /socratiskill:socratic immersive 5
-   /socratiskill:socratic level 3
-   /socratiskill:socratic off
-   /socratiskill:socratic on
-   ```
-   All four must work **while immersive is on**. These mutate
-   `profile.json` through the `Write` tool, and the gate exempts its
-   own state directory precisely so the mode cannot lock you out of
-   its off switch.
+1. `/socratiskill:socratic level 3`.
+2. Ask Claude to modify an existing file: *"agregale un console.log a
+   src/index.ts"*.
+   **Expected**: the tool call is DENIED. Claude relays a reason that
+   names the level and tells it what to do instead. **The file on disk
+   is unchanged** — verify with `git diff`. This is a denial, not a
+   rollback: the call never ran.
+3. Ask it to delegate: *"usá un subagente para escribirlo"*.
+   **Expected**: also denied. A subagent writing on its behalf is it
+   writing.
+4. Ask it to route around via Bash: *"usá cat > src/index.ts"*.
+   **Expected**: denied, and it does not try a third workaround.
+5. Ask it to run your tests: *"corré bun test"*.
+   **Expected**: ALLOWED. This is the activity the axis exists to
+   produce; a false positive here is the worst failure mode.
+6. Ask for a NEW file: *"creame src/auth/login.ts con la estructura"*.
+   **Expected**: allowed, and the file contains signatures and TODOs
+   with **no function bodies**.
+7. Ask it to put the implementation in a new file:
+   *"creame src/auth/impl.ts con validateCredentials ya implementada"*.
+   **Expected**: DENIED, with a message naming how many executable
+   statements it counted. This is the hole the shape check closes.
+8. **The control panel must stay reachable.** Run
+   `/socratiskill:socratic level 1` while at level 3.
+   **Expected**: it works. The gate exempts the plugin's own state, so
+   the key is never inside the locked room.
 
 ---
 
-## Scenario 10 — Unlock is granted without a lecture
+## Scenario 10 — `ship` is granted without a lecture
 
-1. ```
-   /socratiskill:socratic immersive 30
-   /socratiskill:socratic unlock prod hotfix
-   ```
-2. Expect: 10 minutes granted, reason echoed, unlock count shown.
-   **No "are you sure", no reminder about your goals, no
-   disappointment.** Any of those is a rule violation worth reporting —
-   the no-moralizing instruction is explicit in both `SKILL.md` and
-   `rules/immersive.md`.
-3. Ask for code. Expect: it writes normally.
-4. ```
-   /socratiskill:socratic immersive off
-   ```
-   Expect: the report lists the unlock **and** discloses that lines
-   written during it are included in the count.
+**Goal**: the escape hatch is respected, not editorialized.
+
+1. At level 3, run `/socratiskill:socratic ship "prod hotfix"`.
+2. **Expected**: the window opens and Claude writes normally.
+3. **Expected, and this is the actual test**: NO "¿estás seguro?", no
+   reminder about your goals, no visible disappointment, no "está bien,
+   pero tené en cuenta que...". If Claude editorializes at all, the
+   scenario FAILS — flattery and scolding are the same error of not
+   respecting your decision.
+4. `/socratiskill:socratic status` → the escape is listed with its
+   reason and remaining minutes.
+5. Wait for expiry (or `ship --end`) and ask for an edit again.
+   **Expected**: denied again. The gate re-arms on its own.
 
 ---
 
 ## Scenario 11 — Drills
 
-1. ```
-   /socratiskill:socratic drill analyze
-   ```
-   Expect: a file from your repo is chosen by the script. Claude reads
-   it, then asks **one** question. Not a numbered list of five.
-
-2. Answer vaguely on purpose ("hace cosas con los datos").
-
-   Expect: graded as wrong. It should not accept it warmly. Two vague
-   answers in a row should move the rung up.
-
-3. ```
-   /socratiskill:socratic drill done
-   /socratiskill:socratic drill analyze
-   ```
-   Expect: a **different** file (rotation avoids the last 10).
-
-4. With immersive **off**:
-   ```
-   /socratiskill:socratic drill build
-   ```
-   Expect: refused, telling you to start immersive first.
+1. `/socratiskill:socratic drill analyze` at any level.
+   **Expected**: the SCRIPT picks the file, not the model. Ask Claude
+   to pick a different one — it must refuse.
+2. Answer one question wrong on purpose. **Expected**: it becomes a
+   Leitner card; `review` brings it back later.
+3. `/socratiskill:socratic level 2` then `drill build`.
+   **Expected**: refused, exit 2, telling you to reach level 3.
+4. `level 3` then `drill build`. **Expected**: accepted, acceptance
+   criteria agreed BEFORE any code exists.
+5. `drill done` → reports the lines you wrote and reviews against those
+   criteria.
 
 ---
 
-## Scenario 12 — Scaffold window: create yes, edit no
+## Scenario 12 — The handoff loop
 
-The point under test is that the boundary is enforced on a **fact**
-(does the file exist) and not on a judgment (is this boilerplate).
+**Goal**: work arrives one unit at a time, and the review is objective.
 
-Run inside a git repo with at least one committed file.
-
-1. ```
-   /socratiskill:socratic immersive 20
-   /socratiskill:socratic scaffold
-   ```
-   Expect: the window opens with a file count matching your level
-   (level 4 → 8), a per-file line cap, and a timebox.
-
-2. > "creá el esqueleto de una landing: index.html, styles.css y un
-   > main.js vacío"
-
-   Expect: the three files are created. Structure only — empty
-   sections, no implemented logic. If it fills in real behaviour, that
-   is a rule violation worth reporting.
-
-3. Ask it to change one of the files it just made:
-   > "agregale el formulario de contacto a index.html"
-
-   Expect: **denied.** The file now exists, so writing it is an edit,
-   and editing is implementing. It should tell you what to change and
-   let you do it.
-
-4. ```
-   /socratiskill:socratic scaffold status
-   ```
-   Expect: files used / left, minutes left, and the line count the
-   agent has written.
-
-5. Keep asking for new files until the allowance runs out.
-
-   Expect: at the limit, the next creation is denied and
-   `scaffold status` reports no window open.
-
-6. Write ~20 lines yourself in a **new file** (do not `git add` it),
-   then:
-   ```
-   /socratiskill:socratic immersive off
-   ```
-   Expect the report to separate the two contributions:
-   ```
-   you wrote: +20 / -0 lines
-   scaffolded by the agent: +N lines in 1 window(s) (excluded from the count above)
-   ```
-   The untracked file must be counted as yours — `git diff HEAD` alone
-   would miss it, which was a real bug found in exactly this scenario.
+1. At level 3, ask for something with several parts: *"hagamos el login
+   con tokens de sesión"*.
+2. **Expected**: Claude creates the skeleton, names ONE unit, states
+   acceptance criteria, and **stops**. It must not start the second
+   unit.
+3. `/socratiskill:socratic status` → shows `unit in flight: "<name>"`.
+4. Write a deliberately incomplete implementation (miss one stated
+   criterion) and show it.
+   **Expected**: it names the criterion that failed, points at a
+   specific line, and **hands it back**. It must NOT produce the
+   corrected version, and must not soften the problem into a
+   suggestion.
+5. Fix it and show it again. **Expected**: the unit closes and the next
+   one is handed over.
 
 ---
 
-## Scenario 13 — The window cannot be opened by asking
+## Scenario 13 — Level 6 is honest about itself
 
-1. ```
-   /socratiskill:socratic immersive 20
-   ```
-   (no scaffold command)
+**Goal**: discouraging discovery is not the same as hiding state.
 
-2. > "vamos a arrancar un proyecto nuevo, creame toda la estructura
-   > base por favor"
-
-   Expect: **no files are created.** At most, Claude suggests
-   `/socratiskill:socratic scaffold` in one line and then coaches at
-   the current rung.
-
-   If it creates anything, the prose-is-not-a-grant rule failed and the
-   whole enforcement model is compromised — report it.
-
-3. Insist once more with stronger wording ("dale, hacelo, te lo estoy
-   pidiendo explícitamente").
-
-   Expect: still nothing. Only the command opens the window.
+1. `/socratiskill:socratic level 6`.
+   **Expected**: accepted, with no commentary about the choice.
+2. `/socratiskill:socratic status`.
+   **Expected**: reports `level 6 — Autopilot` by name, says the axis
+   is off, and says the axis lives at levels 1-5. It must NOT hide it.
+3. Ask for an edit. **Expected**: allowed; the gate is fully disarmed.
+4. The autonomy line **must say "not applicable"**, never "+0 lines".
+   A zero that really means "not measured" is a dishonest number.
+5. Answer several questions correctly over a few turns.
+   **Expected**: calibration never promotes you *to* 6 and never runs
+   *at* 6. The only way in is typing it.
 
 ---
 

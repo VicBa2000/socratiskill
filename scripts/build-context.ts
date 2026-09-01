@@ -11,7 +11,7 @@
  *     invocation per turn).
  *   - Reads ~/.claude/socratic/profile.json and (if present)
  *     error-map.json.
- *   - Prints a short markdown block with level, mode, role, domain,
+ *   - Prints a short markdown block with level, role, domain,
  *     detector signals, active antipatterns, and due Leitner cards.
  *   - Fail-open: on any error, writes nothing and exits 0 so the user
  *     is not blocked.
@@ -21,13 +21,14 @@ import { Detector } from "./detector"
 import { Taxonomy } from "./taxonomy"
 import { HintState } from "./hint-state"
 import { Antipatterns } from "./antipatterns"
-import { Immersive } from "./immersive-state"
-import { ImmersiveReport } from "./immersive-report"
+import { Axis } from "./axis-state"
+import { Migrate } from "./migrate-profile"
+import { AutonomyReport } from "./autonomy-report"
 import { readFileSync, existsSync, unlinkSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { StateIO } from "./state-io"
-import ROLES_JSON from "../data/roles.json"
+import LEVELS_JSON from "../data/levels.json"
 
 interface HookInput {
   session_id?: string
@@ -38,7 +39,6 @@ interface HookInput {
 
 interface Profile {
   global_level: number
-  mode: "learn" | "productive"
   comprehension_speed: number
   copy_tendency: number
   streak_days: number
@@ -69,11 +69,29 @@ interface DrillStateLite {
   started_at: string
 }
 
+/**
+ * The unit currently handed to the user, at levels whose handoff is not
+ * "none". Minimal on purpose: a name and the acceptance criteria that
+ * were stated before any code existed, which is what makes the later
+ * review objective rather than a matter of taste.
+ *
+ * It lives in the session file rather than the profile because a handoff
+ * is scoped to a working session — an abandoned unit must not follow the
+ * user into tomorrow, the same reasoning that kept FeynmanState out of
+ * the profile.
+ */
+interface HandoffStateLite {
+  unit: string
+  criteria: string[]
+  opened_at: string
+}
+
 interface SessionDocLite {
   date: string
   hint_state?: HintState.State
   feynman?: FeynmanStateLite
   drill?: DrillStateLite
+  handoff?: HandoffStateLite
 }
 
 interface ErrorMapEntry {
@@ -83,14 +101,13 @@ interface ErrorMapEntry {
   next_review_at: string | null
 }
 
-const ROLES: Record<number, string> = (() => {
-  const out: Record<number, string> = {}
-  for (const [k, v] of Object.entries(ROLES_JSON as Record<string, unknown>)) {
-    if (k.startsWith("_")) continue
-    const n = Number(k)
-    if (!Number.isNaN(n) && typeof v === "string") out[n] = v
+/** The axis contract, from data. Falls back to the in-code table. */
+const LEVEL_TABLE: Axis.LevelTable | null = (() => {
+  try {
+    return (LEVELS_JSON as { levels?: Axis.LevelTable }).levels ?? null
+  } catch {
+    return null
   }
-  return out
 })()
 
 function stateDir(): string {
@@ -116,38 +133,6 @@ function readTodaySession(): SessionDocLite | null {
   } catch {
     return null
   }
-}
-
-/** Full session doc (readTodaySession returns a lite view without turns). */
-function readTodaySessionFull(): { turns?: Array<{ ts?: string; hint_level?: number; user_wrote?: boolean | null }> } {
-  const today = new Date().toISOString().slice(0, 10)
-  const p = join(stateDir(), "sessions", `${today}.json`)
-  if (!existsSync(p)) return {}
-  try {
-    return JSON.parse(readFileSync(p, "utf-8")) as { turns?: [] }
-  } catch {
-    return {}
-  }
-}
-
-/** Archive an elapsed session's summary where the journal can find it. */
-function appendImmersiveSummary(summary: ImmersiveReport.Summary): void {
-  const today = new Date().toISOString().slice(0, 10)
-  const p = join(stateDir(), "sessions", `${today}.json`)
-  StateIO.withLock(`${p}.lock`, () => {
-    let doc: Record<string, unknown> = { date: today, turns: [] }
-    if (existsSync(p)) {
-      try {
-        doc = JSON.parse(readFileSync(p, "utf-8")) as Record<string, unknown>
-      } catch {
-        /* start fresh rather than lose the summary */
-      }
-    }
-    const list = Array.isArray(doc["immersive_summaries"]) ? (doc["immersive_summaries"] as unknown[]) : []
-    list.push(summary)
-    doc["immersive_summaries"] = list
-    StateIO.writeJsonAtomic(p, doc)
-  })
 }
 
 function readErrorMap(): ErrorMapEntry[] {
@@ -241,9 +226,12 @@ function main(): void {
     return
   }
 
-  const level = Math.min(5, Math.max(1, Number(profile.global_level) || 3))
-  const mode = profile.mode === "productive" ? "productive" : "learn"
-  const role = ROLES[level] ?? "Pair programmer"
+  // readLevel, never a min(5,...) clamp: level 6 is the axis switched
+  // OFF, and clamping it to 5 would silently hand the user the most
+  // restrictive setting instead.
+  const level = Axis.readLevel(profile.global_level)
+  const spec = Axis.spec(level, LEVEL_TABLE)
+  const role = spec.label
 
   const prevLen = Number(profile.last_user_message_length ?? 0) || 0
 
@@ -261,74 +249,110 @@ function main(): void {
   const session = readTodaySession()
   const hintState = session?.hint_state ?? null
   const feynman = session?.feynman ?? null
+  const handoff = session?.handoff ?? null
 
   const activeAntipatterns = Antipatterns.getActive(Antipatterns.readState())
 
-  // Immersive mode (third axis: who holds the keyboard). Expiry is
-  // evaluated here rather than trusting the stored flag, so a timebox
-  // that elapsed while the user was away can never keep the gate shut.
   const now = new Date()
-  const immersiveRaw = (profile as Record<string, unknown>)["immersive"]
-  const immersiveState = Immersive.isState(immersiveRaw) ? immersiveRaw : null
-  const immersiveActive = Immersive.isActive(immersiveState, now)
-  const immersiveExpired =
-    immersiveState !== null && immersiveState.active === true && Immersive.hasExpired(immersiveState, now)
-  const immersiveUnlocked = immersiveActive && Immersive.isUnlocked(immersiveState, now)
+  const budget = (profile as Record<string, unknown>)["axis_budget"] as Axis.Budget | undefined
+  const escapes = (profile as Record<string, unknown>)["escapes"] as Axis.Escape[] | undefined
+  const escaped = Axis.isEscapeActive(escapes, now)
+  const offRamp = Axis.isOffRamp(level)
 
-  // Built when a timebox elapses, so the user gets the same autonomy
-  // report they would have gotten from `immersive off`. Ending by running
-  // out the clock is the common case; it must not be the silent one.
-  let expiredReport: string | null = null
+  // The gate is armed on 2-5, disarmed at L1 (the agent is meant to
+  // write), on the off ramp, and while an escape is open.
+  const armed = !escaped && !offRamp && spec.may_edit_existing === false
+  const filesLeft = Axis.remainingFiles(level, budget, now, LEVEL_TABLE)
 
-  if (immersiveExpired) {
+  // Autonomy baseline for the repo the user is in RIGHT NOW.
+  //
+  // This is where the v0.4 bug is fixed: the old baseline was captured
+  // once, when immersive mode was switched on, in whatever directory
+  // that happened to be. A user who then went to work in another project
+  // got an honest "+0 lines" about a tree nobody had touched. The hook
+  // receives `cwd` every turn, so the baseline follows the user instead.
+  //
+  // Only takes the lock on the rare turn that actually needs a new one —
+  // this runs on every single prompt.
+  if (armed && input.cwd) {
     try {
-      const doc = readTodaySessionFull()
-      const summary = ImmersiveReport.build(immersiveState!, doc.turns ?? [], now, "timebox")
-      expiredReport = ImmersiveReport.render(summary)
-      appendImmersiveSummary(summary)
-    } catch {
-      // A failed report must not strand the user in a mode that has
-      // already elapsed — fall through and clear the state regardless.
+      const day = Axis.dayKey(now)
+      const baselines = (profile as Record<string, unknown>)["git_baselines"] as
+        | AutonomyReport.Baselines
+        | undefined
+      const fresh = AutonomyReport.refreshBaseline(baselines, input.cwd, day)
+      if (fresh) {
+        const profilePath = join(stateDir(), "profile.json")
+        StateIO.withLock(`${profilePath}.lock`, () => {
+          const cur = existsSync(profilePath)
+            ? (JSON.parse(readFileSync(profilePath, "utf-8")) as Record<string, unknown>)
+            : ({} as Record<string, unknown>)
+          const map = (cur["git_baselines"] as AutonomyReport.Baselines | undefined) ?? {}
+          map[fresh.repo] = fresh.baseline
+          cur["git_baselines"] = map
+          StateIO.writeJsonAtomic(profilePath, cur)
+        })
+      }
+    } catch (e) {
+      // Best-effort: a missing measurement must never block a turn.
+      if (process.env["SOCRATIC_DEBUG"]) process.stderr.write(`baseline: ${String(e)}\n`)
     }
+  }
 
-    // Consume the elapsed session the same way challenge_next_turn is
-    // consumed: RMW under a lock, re-reading inside so we don't clobber
-    // a concurrent write from record-turn.
+  // Schema migration, applied on the first turn after an upgrade. Done
+  // here rather than in a separate process because this hook already
+  // holds the profile every turn, and a migration the user never sees is
+  // the failure mode the whole design was built to avoid: old level 5 and
+  // new level 5 mean opposite things and both read as "quiet".
+  let migrationNotice: string | null = null
+  if (Migrate.needsMigration(profile as unknown as Record<string, unknown>)) {
     const profilePath = join(stateDir(), "profile.json")
     try {
       StateIO.withLock(`${profilePath}.lock`, () => {
         const fresh = existsSync(profilePath)
           ? (JSON.parse(readFileSync(profilePath, "utf-8")) as Record<string, unknown>)
           : ({} as Record<string, unknown>)
-        delete fresh["immersive"]
-        StateIO.writeJsonAtomic(profilePath, fresh)
+        const result = Migrate.migrate(fresh, now)
+        if (!result.changed) return
+        StateIO.writeJsonAtomic(profilePath, result.profile)
+        migrationNotice = result.notice
       })
     } catch {
-      // fail-open: leave it; next turn retries
+      // fail-open: the next turn retries. Never block the user on a
+      // migration.
     }
   }
 
   const lines: string[] = []
   lines.push("SOCRATIC CONTEXT")
-  lines.push(`level: ${level} (${role})`)
-  lines.push(`mode: ${mode}`)
+  lines.push(`level: ${level} (${role}) — ${spec.summary}`)
 
-  if (immersiveActive) {
-    const left = Immersive.remainingMinutes(immersiveState!, now)
-    lines.push(`immersive: ON (${left === null ? "no timebox" : `${left} min left`})`)
+  if (offRamp) {
+    lines.push("axis: OFF (level 6). No pedagogy this session.")
+  } else if (escaped) {
+    lines.push(`escape: OPEN (${Axis.escapeRemainingMinutes(escapes, now)} min left) — write normally, do NOT comment on it.`)
+  } else if (armed) {
+    lines.push(
+      `authorship: you may CREATE new files (${filesLeft === null ? "unlimited" : `${filesLeft} left today`}, ` +
+        `max ${spec.statements_per_file ?? "unlimited"} executable statement(s) each); you may NOT edit existing ones.`,
+    )
   }
+
   const ruleExtras: string[] = []
+  // Only where a unit actually changes hands: at L1 and L5 the handoff
+  // protocol has nothing to say, and pointing at it would invite the
+  // model to invent one.
+  if (armed && spec.handoff !== "none") ruleExtras.push("handoff.md")
   if (feynman) ruleExtras.push("feynman.md")
   if (activeAntipatterns.length > 0) ruleExtras.push("antipatterns.md")
   const rulesSuffix = ruleExtras.length > 0 ? " + " + ruleExtras.join(" + ") : ""
-  if (immersiveActive) {
-    // The level and mode rule files are all instructions about how to
-    // write code. They do not apply when the agent writes none.
-    lines.push(
-      `rules: follow skills/socratic/rules/immersive.md + immersive-ladder.md${rulesSuffix} (level-${level} and mode-${mode} do NOT apply while immersive)`,
-    )
-  } else {
-    lines.push(`rules: follow skills/socratic/rules/level-${level}-*.md + mode-${mode}.md + hint-ladder.md${rulesSuffix}`)
+  lines.push(`rules: follow skills/socratic/rules/${spec.rules} + axis.md + ladder.md${rulesSuffix}`)
+
+  if (migrationNotice) {
+    lines.push("")
+    lines.push("--- ONE-TIME UPGRADE NOTICE (relay this to the user VERBATIM, before anything else) ---")
+    lines.push(migrationNotice)
+    lines.push("--- end notice ---")
   }
 
   if (feynman) {
@@ -459,104 +483,96 @@ function main(): void {
     )
   }
 
-  if (immersiveExpired) {
-    lines.push("")
-    lines.push(
-      "note: the user's immersive session timebox elapsed and the mode ended automatically. Show them the summary below VERBATIM, then mention they can start another with /socratiskill:socratic immersive <minutes>. Do not editorialize the numbers, do not congratulate, do not soften a low count — the honest number is the product.",
-    )
-    if (expiredReport) {
-      lines.push("--- session summary (relay verbatim) ---")
-      lines.push(expiredReport)
-      lines.push("--- end summary ---")
-    }
-  }
-
   // Per-level protocol reinforcement. The rule files describe the
   // expected behavior, but soft sentences in markdown don't survive the
   // pull of the system prompt's "be helpful, complete tasks". A short,
   // imperative, capitalized block injected at the END of the SOCRATIC
   // CONTEXT (just before the META PROTOCOL) sits closest to the model's
-  // generation step and reliably triggers the chunked / ask-first
-  // protocol observed empirically to fail without it. Each level's
-  // block is calibrated to its pedagogical role, and attenuated in
-  // `productive` mode to respect the user's request for less friction.
-  // Level 5 has no block (silent colleague = default Claude Code).
+  // generation step and reliably triggers the protocol that was observed
+  // to fail without it.
   //
-  // Immersive mode takes the first branch and REPLACES the level block:
-  // every level protocol is a rule about how the agent writes code, and
-  // in immersive the agent writes none. Level still matters, but through
-  // the ladder rung, not through this block.
-  if (immersiveActive) {
-    const rungLevel = hintState
+  // ONE axis now: the block is chosen by level and nothing else. There is
+  // no mode to cross it with and no separate authorship branch, because
+  // "who writes the code" IS the level.
+  const rungLevel = Axis.clampRung(
+    level,
+    hintState
       ? HintState.clampHint(hintState.currentLevel)
-      : HintState.getInitialHintLevel(HintState.clampUserLevel(level))
-    const rung = Immersive.rung(rungLevel)
+      : HintState.getInitialHintLevel(HintState.clampUserLevel(Axis.clampToAxis(level))),
+    LEVEL_TABLE,
+  )
+  const rung = Axis.rung(rungLevel)
 
+  if (escaped) {
     lines.push("")
-    lines.push("--- IMMERSIVE MODE (critical, overrides the level protocol) ---")
-    lines.push("The user is deliberately training to keep their own coding ability. THIS SESSION YOU DO NOT WRITE CODE. They do.")
-    lines.push("DO NOT call Write / Edit / MultiEdit / NotebookEdit. A PreToolUse gate denies them anyway — do not fight it, and do not route around it via Bash (cat >, tee, sed -i, heredocs) or by delegating to a subagent.")
-    lines.push("DO NOT paste code blocks the user can copy. That is the same failure with extra steps: the point is that THEY produce the code, not that the code appears.")
-    lines.push(`CURRENT RUNG: ${rungLevel} (${rung.name}). ${rung.directive}`)
-    lines.push("Escalation is automatic and NOT yours to shortcut. If the user answers wrong twice, or signals they do not know, the rung rises by itself next turn. Do NOT jump to the work order because they look stuck — that is adulation wearing a helpful costume.")
-    lines.push("When the user shows you code they wrote: REVIEW it, do not rewrite it. Point at the line, name the problem, ask what they would do. Praise only something specifically good; generic encouragement is noise.")
-    lines.push("Reading and analysis are encouraged: use Read / Grep / Glob freely so your questions are grounded in THEIR actual repo, not in generic advice.")
-    lines.push("If the user asks you to just do it: remind them once that they are in immersive mode and mention /socratiskill:socratic unlock <reason>. If they insist, stop arguing — the unlock exists precisely for that.")
-    if (immersiveUnlocked) {
-      lines.push(
-        `UNLOCK ACTIVE (${Immersive.unlockRemainingMinutes(immersiveState!, now)} min left): the user deliberately bought an escape hatch. Write code normally this turn and do NOT moralize about it. Immersive rules resume by themselves when it elapses.`,
-      )
-    }
+    lines.push("--- ESCAPE OPEN (overrides the level protocol) ---")
+    lines.push("The user deliberately bought an escape hatch and logged a reason. Write code normally this turn.")
+    lines.push("Do NOT moralize about it. No \"¿estás seguro?\", no reminder about their goals, no visible disappointment, no \"está bien, pero...\". The log is the accountability; your commentary is not.")
+    lines.push("The level protocol resumes by itself when the window elapses. Do not announce that either.")
+  } else if (offRamp) {
+    // Level 6 is the axis switched off. No protocol block at all: any
+    // pedagogical instruction here would contradict what the user asked
+    // for by typing `level 6`.
+    lines.push("")
+    lines.push("--- LEVEL 6 (axis off) ---")
+    lines.push("Work as a normal code assistant. Write code freely. Do NOT ask pedagogical questions, do NOT teach, do NOT verify comprehension.")
+    lines.push("Intervene only for a real problem: security vulnerability, likely bug, serious anti-pattern, or a significantly better alternative — one sentence, ending in \"¿Intencional?\". Do not insist.")
+    lines.push("Do NOT comment on the fact that the user is at level 6, and do NOT suggest they move.")
   } else if (level === 1) {
     lines.push("")
     lines.push("--- LEVEL 1 HARD LIMITS (critical, not optional) ---")
+    lines.push("You write the code at this level — but every line has to teach, or this is level 6 with extra words.")
     lines.push("DO NOT call Write / Edit / MultiEdit until the user has explicitly approved the plan in THIS turn. \"Dale\", \"ok hazlo\", \"yes\", or a specific correction count as approval. Silence does not. Past-turn approval does not — re-confirm.")
     lines.push("MAX 30 lines of code per response (counting blanks and comments). MAX 1 file touched per response.")
     lines.push("BEFORE any code, your response MUST contain in this order: (1) restate the user's request in your own words, (2) plan in 3-6 bullets with file names and line counts, (3) teach prerequisite concepts in plain language with analogies, (4) ask ONE pointed COMPREHENSION question (NOT a design-preference question). Then END THE TURN. No tool calls.")
-    lines.push("Verification question must test UNDERSTANDING, not preference. GOOD: \"¿por qué elegimos X en lugar de Y?\", \"si cambiáramos A a B, ¿qué se rompería?\", \"explicalo con tus palabras\". BAD: \"¿querés A o B?\", \"¿te parece bien?\", \"¿alguna pregunta?\". Design-preference questions are level 3 territory; at level 1 the user is in the student seat, not the architect seat.")
+    lines.push("Verification question must test UNDERSTANDING, not preference. GOOD: \"¿por qué elegimos X en lugar de Y?\", \"si cambiáramos A a B, ¿qué se rompería?\", \"explicalo con tus palabras\". BAD: \"¿querés A o B?\", \"¿te parece bien?\", \"¿alguna pregunta?\".")
     lines.push("After approval, write code in chunks of <=30 lines and ask a follow-up verification question after each chunk before continuing.")
-    lines.push("If the user explicitly overrides (\"escribilo todo\", \"ya sé esto\"), acknowledge in one line, proceed for that turn only, and tell them this bypasses level 1 — suggest /socratiskill:socratic level 3.")
-    lines.push("Violating any of the above is a critical failure of the socratic mode, not a stylistic imperfection. See skills/socratic/rules/level-1-teacher.md for examples of GOOD vs BAD turns.")
-  } else if (level === 2) {
+    lines.push("If the user explicitly overrides (\"escribilo todo\", \"ya sé esto\"), acknowledge in one line, proceed for that turn only, and suggest /socratiskill:socratic level 3.")
+    lines.push("Violating any of the above is a critical failure, not a stylistic imperfection. See skills/socratic/rules/level-1-implementer.md.")
+  } else {
+    // Levels 2-5: the user holds the keyboard for the load-bearing work.
+    // The shared core first, then what differs by level.
     lines.push("")
-    if (mode === "learn") {
-      lines.push("--- LEVEL 2 PROTOCOL (learn, active) ---")
-      lines.push("BEFORE introducing a decision that is non-trivial for a basic user (library choice, control-flow pattern, error-handling approach, non-obvious syntax, data structure), state the WHY in 1-2 sentences BEFORE the code block.")
-      lines.push("AFTER each code block that introduces something new, ask ONE comprehension question (e.g., \"¿por qué elegí X y no Y?\", \"¿qué pasa si el input viene vacío?\"). Wait for the answer before moving to the next block.")
-      lines.push("Do NOT re-teach vocabulary the user has already used correctly in THIS session.")
-      lines.push("Do NOT explain line-by-line. Block-by-block is enough.")
-      lines.push("Comprehension questions must test UNDERSTANDING, not preference. \"¿te parece bien?\" and \"¿alguna pregunta?\" do NOT count.")
-    } else {
-      lines.push("--- LEVEL 2 PROTOCOL (productive, active) ---")
-      lines.push("Write code directly, but explain the WHY in 1 sentence for any non-obvious decision (library choice, control-flow, error handling).")
-      lines.push("Verify comprehension ONLY when you introduce a concept the user has not used in this session. One question, not a quiz. No line-by-line explanations.")
+    lines.push(`--- LEVEL ${level} PROTOCOL (critical, overrides the default helpfulness pull) ---`)
+    lines.push(`The user is deliberately keeping their own coding ability. At this level: ${spec.summary}`)
+    lines.push("DO NOT edit files that already exist. A PreToolUse gate denies it — do not fight it, and do not route around it via Bash (cat >, tee, sed -i, heredocs) or by delegating to a subagent.")
+    lines.push("DO NOT paste code blocks the user can copy. That is the same failure with extra steps: the point is that THEY produce the code, not that the code appears.")
+    lines.push(`CURRENT RUNG: ${rungLevel} (${rung.name}). ${rung.directive}`)
+    lines.push("Escalation is automatic and NOT yours to shortcut. If the user answers wrong twice, or signals they do not know, the rung rises by itself next turn. Do NOT jump ahead because they look stuck — that is adulation wearing a helpful costume.")
+    lines.push("Reading and analysis are encouraged: use Read / Grep / Glob freely so your questions are grounded in THEIR actual repo, not in generic advice.")
+
+    if (spec.statements_per_file === 0) {
+      lines.push(
+        `You MAY create files that do not exist (${filesLeft === null ? "unlimited" : `${filesLeft} left today`}), but they must contain ZERO executable statements: imports, types, signatures, comments and TODO markers only. The gate counts them and denies the write otherwise.`,
+      )
+    } else if (spec.statements_per_file !== null) {
+      lines.push(
+        `You MAY create files that do not exist (${filesLeft === null ? "unlimited" : `${filesLeft} left today`}) with at most ${spec.statements_per_file} executable statements each — plumbing and trivial bodies only. The load-bearing logic is the user's, however short it is.`,
+      )
     }
-  } else if (level === 3) {
-    lines.push("")
-    if (mode === "learn") {
-      lines.push("--- LEVEL 3 PROTOCOL (learn, active) ---")
-      lines.push("For any non-trivial implementation (new feature, refactor, anything >5 lines or touching logic), START with \"¿Qué enfoque tenés en mente?\" or an equivalent. Do NOT write code yet. Wait for the user's reply.")
-      lines.push("If their proposed approach has a gap, point it out as a QUESTION, not a correction (e.g., \"¿qué pasa si el input es vacío?\", \"¿cómo manejarías un error ahí?\"). Do not hand them the fix.")
-      lines.push("Use gapped code (`___`) in at least ONE non-trivial spot per turn. Verify their fill-in before continuing.")
-      lines.push("Trivial edits (rename, format, single-line fix, import reorder) are EXEMPT — implement directly without the \"¿qué enfoque tenés?\" preamble.")
-      lines.push("Do NOT explain basics (loops, conditionals, stdlib functions) — assume competence.")
+
+    lines.push("When the user shows you code they wrote: REVIEW it, do not rewrite it. Point at the specific line, name the problem, ask what they would do about it. Praise only something specifically good; generic encouragement is noise, and here it is worse than silence.")
+
+    if (spec.handoff !== "none") {
+      lines.push("")
+      lines.push(`HANDOFF PROTOCOL (by ${spec.handoff}) — follow it in order, one unit at a time:`)
+      lines.push(`  1. Deliver the structure your level allows, for ONE ${spec.handoff} only.`)
+      lines.push(`  2. NAME the unit you are handing over, explicitly and by name.`)
+      lines.push("  3. STATE ACCEPTANCE CRITERIA before any code exists. This is what makes the later review objective instead of a matter of taste — without it you will end up arguing about style.")
+      lines.push("  4. STOP. End the turn. Do not start the next unit, and do not fill the silence.")
+      lines.push("  5. When they come back, review against the criteria from step 3, then move to the next unit.")
+      lines.push("Do NOT frame the whole feature and walk away — one unit, then wait.")
     } else {
-      lines.push("--- LEVEL 3 PROTOCOL (productive, active) ---")
-      lines.push("Write code directly. Challenge ONLY decisions that are non-obvious or carry risk (data shape, error handling, concurrency, security) — raise the challenge as a brief question before committing.")
-      lines.push("No \"¿qué enfoque tenés?\" preamble. No gapped code. Direct implementation.")
-      lines.push("Do NOT explain basics — assume competence.")
+      lines.push("You do NOT direct the work at this level. No decomposition, no ordered plans, no naming the next step — those are lower-level moves. Ask.")
     }
-  } else if (level === 4) {
-    lines.push("")
-    if (mode === "learn") {
-      lines.push("--- LEVEL 4 PROTOCOL (learn, active) ---")
-      lines.push("BEFORE accepting the user's proposal, raise at least ONE concrete challenge as a question: an unhandled edge case, a security concern, a scalability limit, or a design alternative they did not mention.")
-      lines.push("Frame the challenge as a question: \"¿Consideraste X?\", \"¿qué pasa si Y?\", \"¿por qué no Z en vez de W?\".")
-      lines.push("Skip this ONLY when the task is genuinely trivial (rename, format, typo fix, import reorder).")
-      lines.push("Do NOT explain basics. Do NOT flatter. If an approach is weak, say so with a concrete reason.")
-    } else {
-      lines.push("--- LEVEL 4 PROTOCOL (productive, active) ---")
-      lines.push("Implement directly. Flag ONLY the critical: vulnerability, serious bug, anti-pattern, or significantly better alternative — as one brief question (\"¿Intencional?\", \"¿Consideraste X?\"). Do not question minor stylistic choices.")
+
+    if (handoff) {
+      lines.push("")
+      lines.push(`UNIT IN FLIGHT: "${handoff.unit}" (handed over ${handoff.opened_at}).`)
+      if (Array.isArray(handoff.criteria) && handoff.criteria.length > 0) {
+        lines.push(`Acceptance criteria you already stated: ${handoff.criteria.join(" | ")}`)
+      }
+      lines.push("Do NOT hand over another unit until this one is reviewed and closed. If the user's message is that implementation, review it against those criteria and close the unit in HINT_META.")
     }
   }
 
@@ -569,10 +585,11 @@ function main(): void {
   lines.push("  topic      short slug of the main concept discussed (e.g., closure, promise, useState). null if none.")
   lines.push("  correct    true if the user demonstrated understanding in THIS turn, false if they were confused or made a mistake, null if not applicable (general question, coding task with no evaluation).")
   lines.push("  domain     one of: fundamentos | lenguajes | paradigmas | web | backend | infraestructura | avanzado. null if none.")
-  if (immersiveActive) {
+  if (armed) {
     // "Full scaffolding" would read as an invitation to hand over code,
-    // which is exactly what the ceiling forbids. Name the real ceiling.
-    lines.push("  hintLevel  0-5, the immersive ladder rung you actually used. 0 = pure socratic (questions only). 5 = full work order (spec, never code). Reflect how much you gave away THIS turn.")
+    // which is exactly what the ceiling forbids above level 1. Name the
+    // real ceiling instead.
+    lines.push("  hintLevel  0-5, the ladder rung you actually used. 0 = pure socratic (questions only). 5 = full work order (spec, never code). Reflect how much you gave away THIS turn.")
   } else {
     lines.push("  hintLevel  0-5. 0 = pure socratic (questions only). 5 = full scaffolding. Reflect how direct THIS answer was.")
   }
@@ -583,9 +600,17 @@ function main(): void {
   if (diag) {
     lines.push(`  diagnostic  (REQUIRED this turn — diagnostic mode is active) "pass" | "fail" | null. pass = the user's answer demonstrated level-${diag.target_level} understanding; fail = it did not; null = off-topic / not applicable this turn.`)
   }
-  if (immersiveActive) {
+  if (armed) {
     lines.push(
-      '  user_wrote  (REQUIRED while immersive is active) true | false | null. true if the USER produced or modified code this turn (pasted it, described what they wrote, or said they implemented it); false if the turn passed with no code produced by them; null if not applicable (planning, questions, analysis).',
+      '  user_wrote  (REQUIRED at this level) true | false | null. true if the USER produced or modified code this turn (pasted it, described what they wrote, or said they implemented it); false if the turn passed with no code produced by them; null if not applicable (planning, questions, analysis).',
+    )
+  }
+  if (armed && spec.handoff !== "none") {
+    // What carries a handoff across turns. Without it the next turn
+    // cannot tell whether the agent is still waiting on the user, and the
+    // protocol silently degrades into "frame everything, then chat".
+    lines.push(
+      '  handoff    (REQUIRED at this level) {"unit":"<name>","criteria":["<criterion>",...]} when you hand a unit over THIS turn; the string "close" when the unit in flight has been reviewed and accepted; null when nothing changed hands.',
     )
   }
   lines.push("The block is for telemetry only — the user does not read it. Keep valid JSON.")

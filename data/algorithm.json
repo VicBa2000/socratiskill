@@ -11,10 +11,7 @@
     "3": { "window": 7,  "correct_required": 5 },
     "4": { "window": 7,  "correct_required": 5 }
   },
-  "_scaffold_comment": "Immersive scaffold window: how many NEW files the agent may create when the user explicitly grants one. The level scales the SIZE of the window, never the category of what is allowed — for a novice, typing boilerplate still builds fluency; for an advanced user it does not. max_lines is flat because tedium does not scale with level: an HTML skeleton is the same 80 lines for everyone. These are the knob to tune after real use.",
-  "scaffold_files_by_level": { "1": 2, "2": 3, "3": 5, "4": 8, "5": 12 },
-  "scaffold_max_lines_per_file": 80,
-  "scaffold_window_minutes": 20,
+  "_authorship_moved": "The scaffold_* knobs moved to data/levels.json when the scaffold window became a per-level daily budget. They also changed meaning: the file count used to scale UP with level (a novice was made to type boilerplate for fluency), which inverts under an axis where a higher level means more of the work is yours. The two concerns were then separated — files_per_day is relief from TEDIUM and stays roughly flat, because typing package.json costs the same at every level; statements_per_file is how much of the THINKING is still the agent's, and that is what the level is actually for.",
   "calibration_down_by_level": {
     "2": { "window": 5, "wrong_required": 3 },
     "3": { "window": 5, "wrong_required": 3 },

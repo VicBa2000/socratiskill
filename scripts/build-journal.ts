@@ -46,29 +46,28 @@ interface FeynmanSummary {
   gaps: string[]
 }
 
-interface ImmersiveSummary {
-  started_at: string
-  ended_at: string
-  duration_minutes: number
-  ended_by: "manual" | "timebox"
+/** One day's autonomy snapshot. Mirrors AutonomyReport.Summary. */
+interface AutonomySummary {
+  date: string
+  level: number
   lines_added: number | null
   lines_removed: number | null
   repo: string | null
   turns_total: number
   turns_user_wrote: number
   avg_rung: number | null
-  unlock_count: number
-  unlock_minutes: number
-  unlock_reasons: string[]
-  scaffold_lines?: number
-  scaffold_windows?: number
+  escape_count: number
+  escape_minutes: number
+  escape_reasons: string[]
+  agent_lines?: number
+  agent_files?: number
 }
 
 interface SessionDoc {
   date: string
   turns: TurnRecord[]
   feynman_summaries?: FeynmanSummary[]
-  immersive_summaries?: ImmersiveSummary[]
+  autonomy_summaries?: AutonomySummary[]
 }
 
 interface ErrorMapEntry {
@@ -202,10 +201,10 @@ function aggregateTopics(sessions: SessionDoc[]): TopicStat[] {
   return Array.from(byKey.values())
 }
 
-function gatherImmersiveSummaries(sessions: SessionDoc[]): ImmersiveSummary[] {
-  const out: ImmersiveSummary[] = []
+function gatherAutonomySummaries(sessions: SessionDoc[]): AutonomySummary[] {
+  const out: AutonomySummary[] = []
   for (const s of sessions) {
-    if (Array.isArray(s.immersive_summaries)) out.push(...s.immersive_summaries)
+    if (Array.isArray(s.autonomy_summaries)) out.push(...s.autonomy_summaries)
   }
   return out
 }
@@ -279,7 +278,7 @@ function buildMarkdown(period: Period, now: Date, sessions: SessionDoc[]): strin
   if (
     totalTurns === 0 &&
     gatherFeynmanSummaries(sessions).length === 0 &&
-    gatherImmersiveSummaries(sessions).length === 0
+    gatherAutonomySummaries(sessions).length === 0
   ) {
     const scope = period === "today" ? "today" : `this ${period}`
     lines.push(`No activity recorded ${scope}.`)
@@ -318,42 +317,49 @@ function buildMarkdown(period: Period, now: Date, sessions: SessionDoc[]): strin
     lines.push("")
   }
 
-  const immersive = gatherImmersiveSummaries(sessions)
-  if (immersive.length > 0) {
+  const autonomy = gatherAutonomySummaries(sessions)
+  if (autonomy.length > 0) {
     // Plain totals, no goal and no gamification. The signal the user
     // actually asked for is the trend, so period-over-period comparison
     // is left to reading two journals side by side rather than to a
     // score this file would have to invent.
-    const totalMin = immersive.reduce((a, s) => a + s.duration_minutes, 0)
-    const measured = immersive.filter((s) => s.lines_added !== null)
+    const measured = autonomy.filter((s) => s.lines_added !== null)
     const added = measured.reduce((a, s) => a + (s.lines_added ?? 0), 0)
     const removed = measured.reduce((a, s) => a + (s.lines_removed ?? 0), 0)
-    const unlocks = immersive.reduce((a, s) => a + s.unlock_count, 0)
-    const scaffoldLines = immersive.reduce((a, s) => a + (s.scaffold_lines ?? 0), 0)
-    const scaffoldWindows = immersive.reduce((a, s) => a + (s.scaffold_windows ?? 0), 0)
-    const wrote = immersive.reduce((a, s) => a + s.turns_user_wrote, 0)
-    const turns = immersive.reduce((a, s) => a + s.turns_total, 0)
-    const rungs = immersive.filter((s) => s.avg_rung !== null).map((s) => s.avg_rung as number)
+    const escapes = autonomy.reduce((a, s) => a + (s.escape_count ?? 0), 0)
+    const agentLines = autonomy.reduce((a, s) => a + (s.agent_lines ?? 0), 0)
+    const agentFiles = autonomy.reduce((a, s) => a + (s.agent_files ?? 0), 0)
+    const wrote = autonomy.reduce((a, s) => a + s.turns_user_wrote, 0)
+    const turns = autonomy.reduce((a, s) => a + s.turns_total, 0)
+    const rungs = autonomy.filter((s) => s.avg_rung !== null).map((s) => s.avg_rung as number)
     const avgRung =
       rungs.length > 0 ? Math.round((rungs.reduce((a, b) => a + b, 0) / rungs.length) * 10) / 10 : null
 
-    lines.push(`## Autonomy (immersive mode)`)
-    lines.push(`- sessions: ${immersive.length} (${totalMin} min total)`)
+    // Time spent on the off ramp is the ONLY signal available for the
+    // risk that level 6 quietly becomes a permanent escape and hollows
+    // the plugin out (RU-2). Reported plainly, never scolded.
+    const offRampDays = autonomy.filter((s) => s.level === 6).length
+
+    lines.push(`## Autonomy`)
+    lines.push(`- days recorded: ${autonomy.length}`)
     if (measured.length > 0) {
       lines.push(`- you wrote: +${added} / -${removed} lines`)
     }
-    if (measured.length < immersive.length) {
-      lines.push(`- ${immersive.length - measured.length} session(s) not measured (not started inside a git repo)`)
+    if (measured.length < autonomy.length) {
+      lines.push(`- ${autonomy.length - measured.length} day(s) not measured (no git repo at the working location)`)
     }
-    if (scaffoldWindows > 0) {
-      lines.push(`- scaffolded by the agent: +${scaffoldLines} lines in ${scaffoldWindows} window(s), excluded above`)
+    if (agentFiles > 0) {
+      lines.push(`- created by the agent: +${agentLines} lines across ${agentFiles} file(s), excluded above`)
     }
     lines.push(`- turns where you produced code: ${wrote} / ${turns}`)
     if (avgRung !== null) lines.push(`- average ladder rung: ${avgRung} (lower = less help needed)`)
-    lines.push(`- unlocks: ${unlocks}`)
-    if (unlocks > 0) {
-      const reasons = immersive.flatMap((s) => s.unlock_reasons)
+    lines.push(`- escapes: ${escapes}`)
+    if (escapes > 0) {
+      const reasons = autonomy.flatMap((s) => s.escape_reasons ?? [])
       for (const r of reasons.slice(0, 10)) lines.push(`  - ${r}`)
+    }
+    if (offRampDays > 0) {
+      lines.push(`- days at level 6 (axis off, not measured): ${offRampDays}`)
     }
     lines.push("")
   }

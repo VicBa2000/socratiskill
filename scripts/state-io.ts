@@ -239,7 +239,7 @@ export namespace StateIO {
     const known = [
       "topic", "correct", "domain", "hintLevel",
       "accompanied", "reason", "feynman_gap",
-      "readiness", "diagnostic", "user_wrote",
+      "readiness", "diagnostic", "user_wrote", "handoff",
     ]
     return known.some((k) => k in x)
   }
