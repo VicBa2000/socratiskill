@@ -7,7 +7,7 @@
     ╚══════╝ ╚═════╝  ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝   ╚═╝╚══════╝╚═╝  ╚═╝╚═╝╚══════╝╚══════╝
     ──────────────────────────────────────────────────────────────────────────────────────
     ░▒▓█   A D A P T I V E   S O C R A T I C   M E N T O R   F O R   C L A U D E   █▓▒░
-                       >>  v0.5.1 · MIT · github.com/VicBa2000/socratiskill  <<
+                       >>  v0.5.2 · MIT · github.com/VicBa2000/socratiskill  <<
 ```
 
 # Socratiskill
@@ -608,7 +608,7 @@ Two complementary suites — together cover the pedagogical flow AND the
 threat model.
 
 ```bash
-bash tests/run-all.sh         # 29 scenarios, 197 assertions (functional)
+bash tests/run-all.sh         # 35 scenarios, 278 assertions (functional)
 bash tests/run-security.sh    #  8 scenarios, 40 assertions (adversarial)
 # flags for both: --only <N>, --stop-on-fail, --list
 ```
@@ -622,9 +622,11 @@ per-level protocol blocks for all six levels, antipatterns, Feynman
 mode, Leitner spaced repetition, journal generation,
 install/uninstall idempotence, the pause/resume cycle, the
 `enabled=false` silencer, and the whole axis: the gate (create-vs-edit,
-the shape check against real TS/Python/C# skeletons *and* real
-implementations, the daily budget, subagent delegation, bash
-write-detection with a false-positive battery), the `ship` escape and
+the shape check in both directions — honest skeletons in all thirteen
+supported languages must pass, real implementations must not, and the
+line-level contract pins each construct so a widened regex cannot
+quietly swallow a statement), the daily budget, subagent delegation,
+bash write-detection with a false-positive battery), the `ship` escape and
 its expiry, the v0.4→v0.5 profile migration, the handoff protocol and
 unit continuity across turns, the git-based autonomy measurement across
 a mid-session commit and across two repositories, drill selection and
@@ -638,7 +640,7 @@ write under interruption, concurrent RMW on `profile.json`,
 antipattern regex bounds, hostile stdin to the hooks, and topic
 injection (null bytes, RTL unicode, shell metacharacters).
 
-Combined: **313 assertions, all green** as of v0.5.1.
+Combined: **318 assertions, all green** as of v0.5.2.
 
 For a manual end-to-end in a live Claude Code session, see
 [MANUAL-TEST.md](./MANUAL-TEST.md).
@@ -685,7 +687,7 @@ scripts/
 data/                  domains, prerequisites, technical terms, antipatterns,
                        roles, algorithm constants
 tests/
-  run-all.sh           34 scenarios, 273 assertions (functional)
+  run-all.sh           35 scenarios, 278 assertions (functional)
   run-security.sh      8 scenarios, 40 assertions (adversarial)
 sistemas.txt           full technical reference (rules, thresholds,
                        state files, hooks, every system)
