@@ -7,7 +7,8 @@ per-turn detectors, domain taxonomy, antipatterns, Feynman mode,
 spaced repetition, hooks, persistent state, plugin states, and the
 authorship gate.
 
-Updated after the shape-check vocabulary fix (v0.5.2, September 2026).
+Updated for v0.5.3 (September 2026): the pause-resurrection fix and
+the `template` delivery mode.
 
 
 TABLE OF CONTENTS
@@ -29,6 +30,7 @@ TABLE OF CONTENTS
   7. Domain taxonomy
   8. Antipatterns
   9. Feynman mode (role inversion)
+       9.1 Template mode (delivery, not pedagogy)
  10. Leitner / spaced repetition (error-map)
  11. Plugin subcommands
  12. Injection channels (hooks)
@@ -695,6 +697,63 @@ Close: /socratiskill:socratic endteach.
   - The journal (build-journal.ts) harvests the summaries.
 
 
+----------------------------------------------------------------
+9.1 TEMPLATE MODE (DELIVERY, NOT PEDAGOGY)
+----------------------------------------------------------------
+
+scripts/template.ts. Invocation:
+/socratiskill:socratic template [on|off].
+
+What it is: a way to declare ONCE — instead of renegotiating
+every turn — that the agent hands over structure only (real
+signature, numbered work order in comments, six parts) and the
+USER types the bodies.
+
+State (in sessions/<today>.json, like feynman and drill):
+  template: { started_at: <iso>, turns: <n> }
+It does NOT touch profile.json and does NOT move global_level.
+It is a session episode, not a calibration change.
+
+IT DOES NOT LOOSEN THE GATE, in either direction:
+  - It never denies anything the level allowed. The mode is
+    opt-in; whoever turned it on already decided. Enforcement was
+    built (v0.5.3-dev) and reverted on purpose — level 1 is the
+    RESCUE level and is the worst possible place for a wall.
+  - It never permits anything the level denied. Injecting it at
+    L5 would turn "asks only" into "hands over skeletons", which
+    is the one thing no delivery mode may do.
+
+Per-level effect (build-context gates the wording by level):
+  L1   OVERRIDE of the level's delivery. L1 normally writes the
+       code; with the mode on it hands over structure and the
+       user writes the bodies. This is the case the mode exists
+       for.
+  L2-L3 FORM ONLY. These levels already deliver skeletons; the
+       mode fixes their shape. It does not authorize one extra
+       line.
+  L4-L6 Not injected at all. L4 delivers no skeleton, and L6 is
+       the axis switched off. `template on` above L3 says so
+       instead of leaving a switch the user thinks is on.
+
+Also fixed by this mode: at L1, HINT_META.user_wrote used to be
+requested only when the gate was armed — which L1 never arms. So
+the turns where the user wrote ALL of the code were exactly the
+ones recorded as user_wrote:null. L1 now records authorship.
+
+KNOWN RESIDUE (level contract, not a bug in the mode): at L3 the
+template in CALL-EXPRESSION form is denied, because
+statements_per_file = 0 IS the definition of level 3. The
+DECLARATIVE form passes — the numbered work order moves above the
+signature and there is no body to fill. Both forms are documented
+in rules/template.md, and tests/fixtures/template-examples.ts
+runs each documented block through the real gate at the level its
+marker declares.
+
+Naming note: `scaffold` is RETIRED vocabulary (the v0.4 scaffold
+window). S37 bans /\bscaffold\b/ in skills/ and hooks/ so the
+dead name cannot come back with a new meaning.
+
+
 ================================================================
 10. LEITNER / SPACED REPETITION (ERROR-MAP)
 ================================================================
@@ -775,9 +834,11 @@ Plugin control:
 Calibration / progression:
   calibrate                 initial calibration flow
   level <1-5>               sets global_level (bypasses pipeline)
-  mode <learn|productive>   sets mode
   accept                    applies pending_calibration_change
   challenge                 one-turn anti-adulation
+
+  There is NO `mode` subcommand. The learn/productive axis was
+  removed in the v0.5.0 unification; the level is the only dial.
 
 Manual hints:
   hint / faster             +1 hint level
@@ -786,6 +847,16 @@ Manual hints:
 Feynman:
   teach <topic>             enter Feynman mode
   endteach                  exit Feynman with summary
+
+Delivery:
+  template [on|off]         template delivery mode (see section 9.1)
+
+Gate / autonomy:
+  ship [minutes] <reason>   open a logged escape (see 15.8)
+  handoff                   guided handoff, L2-L4 (see 15.9)
+  autonomy                  autonomy report (see 15.10)
+  drill [analyze|build|fix|status|done|cancel]
+                            bounded exercises on real code
 
 Spaced repetition:
   review                    run one due review card
@@ -810,10 +881,13 @@ adds them to ~/.claude/settings.json as a marker-delimited block
     "UserPromptSubmit hook success: <content>"
 
   Block content:
-    level: N (Role)
-    mode: learn|productive
-    rules: follow level-N-*.md + mode-X.md + hint-ladder.md[+ extras]
+    level: N (Role) — <summary>
+    authorship: <what you may create / edit, budget left today>
+    rules: follow skills/socratic/rules/level-N-*.md + axis.md
+           + ladder.md [+ extras: feynman.md, template.md, ...]
     [feynman: ... ]
+    [template: ON since <iso> (N turn(s)) — the user writes the
+     bodies]
     domain: <key> (<label>) | (none detected)
     [hint: N (name) [zk-active]]
     signals: <zk / slow-down / copy-paste / tech-terms / (none)>
@@ -892,7 +966,22 @@ Main files:
                               hint_state,
                               last_calibration_eval_turn,
                               feynman (if active),
-                              feynman_summaries (historic)
+                              feynman_summaries (historic),
+                              template (if active, see 9.1)
+
+                            NOTHING downstream of the Stop hook
+                            may CREATE profile.json. record-turn
+                            checks existsSync(profile) as its
+                            kill switch, the same contract as
+                            build-context, gate-tool and
+                            hook-pre-tool. Without it, a paused
+                            plugin (profile.json renamed to
+                            .paused) came back to life: the Stop
+                            hook wrote a profile with no
+                            global_level, readLevel(undefined)
+                            returned DEFAULT_LEVEL = 3, and
+                            resume then aborted with two profiles
+                            on disk. S38 is the regression test.
 
   journal/daily-<YYYY-MM-DD>.md
   journal/weekly-<YYYY-WW>.md
