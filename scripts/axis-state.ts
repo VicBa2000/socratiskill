@@ -459,10 +459,24 @@ export namespace Axis {
    * three are fail-open by construction: a gate that blocks real work
    * by mistake gets uninstalled, so every uncertain path ends here.
    */
+  /**
+   * The level whose AUTHORSHIP contract template mode borrows when it is
+   * armed at level 1. Level 3 is the one that means "signatures and
+   * comments, zero statements" — exactly what the mode promises the user.
+   */
+  export const TEMPLATE_CONTRACT_LEVEL = 3
+
   export interface GateContract {
     armed: boolean
     level: number
     label: string
+    /**
+     * What a denial cites as the rule it is enforcing. Normally
+     * "LEVEL <n>", but template mode at level 1 enforces a contract the
+     * level does not have, and a message reading "LEVEL 1: the limit is 0"
+     * would be a plain lie — level 1 has no limit.
+     */
+    authority: string
     mayEditExisting: boolean
     mayCreateFiles: boolean
     statementAllowance: number | null
@@ -477,17 +491,39 @@ export namespace Axis {
     now: Date,
     maxLinesPerFile: number,
     table?: LevelTable | null,
+    templateActive = false,
   ): GateContract {
     const s = spec(level, table)
     const escaped = isEscapeActive(escapes, now)
-    const armed = !escaped && !isOffRamp(level) && s.may_edit_existing === false
+    const lvl = Math.round(level)
+
+    // Template mode, armed. Level 1 is the only place this changes
+    // anything: it is the one level whose contract says the agent writes
+    // the code, so it is the one level where "you write the bodies" needs
+    // teeth rather than a directive. At 2-3 the gate is already armed by
+    // the level and the mode only sets shape; at 4+ the mode is not even
+    // injected.
+    //
+    // An open escape still wins. `ship` is the one lever that outranks the
+    // axis, and a mode the user turned on themselves must not become the
+    // thing they cannot get out of.
+    const borrowed = templateActive && !escaped && lvl === MIN_LEVEL
+    const auth = borrowed ? spec(TEMPLATE_CONTRACT_LEVEL, table) : s
+
+    const armed = !escaped && !isOffRamp(level) && auth.may_edit_existing === false
     return {
       armed,
-      level: Math.round(level),
+      level: lvl,
       label: s.label,
+      authority: borrowed ? `TEMPLATE MODE (level ${lvl})` : `LEVEL ${lvl}`,
       mayEditExisting: !armed,
-      mayCreateFiles: mayCreateFiles(level, table),
-      statementAllowance: s.statements_per_file,
+      mayCreateFiles: mayCreateFiles(borrowed ? TEMPLATE_CONTRACT_LEVEL : level, table),
+      statementAllowance: auth.statements_per_file,
+      // Deliberately NOT borrowed: the daily file budget is relief from
+      // TEDIUM, which is a separate knob from how much of the THINKING is
+      // the agent's (see the _budget_comment in data/levels.json). Typing
+      // package.json costs the same whether or not you asked for
+      // templates, so level 1 keeps its unlimited count.
       remainingFiles: remainingFiles(level, budget, now, table),
       maxLinesPerFile: Math.max(1, Math.round(maxLinesPerFile)),
     }

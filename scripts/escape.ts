@@ -39,6 +39,21 @@ function profilePath(): string {
   return join(stateDir(), "profile.json")
 }
 
+/**
+ * Whether template mode is on for today. Same read as gate-tool's: the
+ * session doc is the authority, never the fast-path marker.
+ */
+function templateActive(): boolean {
+  const p = join(stateDir(), "sessions", `${new Date().toISOString().slice(0, 10)}.json`)
+  if (!existsSync(p)) return false
+  try {
+    const doc = JSON.parse(readFileSync(p, "utf-8")) as { template?: unknown }
+    return doc.template !== undefined && doc.template !== null
+  } catch {
+    return false
+  }
+}
+
 function readProfile(): Record<string, unknown> | null {
   const p = profilePath()
   if (!existsSync(p)) return null
@@ -151,8 +166,16 @@ function cmdOpen(args: Args): void {
     process.stderr.write("nothing to escape from: the axis is already off at level 6\n")
     process.exit(2)
   }
-  if (level === Axis.MIN_LEVEL) {
+  // Level 1 normally has nothing to escape from — the agent already writes
+  // the code. Template mode is the exception: it arms the gate at a level
+  // whose own contract does not, so at that point there IS a lock, and
+  // refusing to open the escape would leave the user holding a mode they
+  // turned on themselves with no fast way out. `template off` also works,
+  // but nobody in a hurry goes looking for the specific off switch — they
+  // reach for the one escape valve the plugin advertises everywhere.
+  if (level === Axis.MIN_LEVEL && !templateActive()) {
     process.stderr.write("nothing to escape from: at level 1 the agent already writes the code\n")
+    process.stderr.write("(if you meant to leave template mode: /socratiskill:socratic template off)\n")
     process.exit(2)
   }
 

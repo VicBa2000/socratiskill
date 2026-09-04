@@ -1957,6 +1957,64 @@ if should_run 39; then
   OUT=$(fire_pre "$tmp" "algo")
   echo "$OUT" | grep -q "TEMPLATE MODE" && fail "S39t mode injected on the off ramp" || pass "not injected at level 6"
 
+  # --- the gate, armed --------------------------------------------------
+  #
+  # WHY. Until now the mode was a PROMISE: the directive said "the user
+  # writes the bodies" and nothing enforced it, because `armed` is derived
+  # from the level spec and level 1 has may_edit_existing:true. A model
+  # that drifted at turn 40 and wrote the body hit nothing. That is R2 in
+  # CLAUDE.md, and it is the whole reason the user had to keep repeating
+  # the request in the first place.
+  #
+  # Now template mode borrows the AUTHORSHIP half of level 3's contract at
+  # level 1: zero statements, no editing existing files. The daily file
+  # budget is deliberately NOT borrowed -- that knob is relief from tedium,
+  # not a measure of whose thinking it is.
+  set_level "$tmp" 1
+  SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/template.ts" off >/dev/null 2>&1
+
+  BODY='const hash = await bcrypt.hash(password, 10);
+await db.users.insert({ email, hash });'
+  TMPL='// TODO(user): 1. sacar { email, password } de req.body
+// 2. validar -> 400 y cortar
+export function registerHandler(req, res)'
+
+  V=$(gate_verdict "$tmp" "Write" "$BODY")
+  [[ "$V" == "allow" ]] && pass "level 1 alone: the agent may write the body (it is its job)"     || fail "S39v level 1 denied a body with the mode OFF"
+
+  SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/template.ts" on >/dev/null 2>&1
+  V=$(gate_verdict "$tmp" "Write" "$BODY")
+  [[ "$V" == "deny" ]] && pass "mode on: the gate DENIES a body at level 1"     || fail "S39w the mode is still only a promise -- a full body was allowed"
+
+  V=$(gate_verdict "$tmp" "Write" "$TMPL")
+  [[ "$V" == "allow" ]] && pass "mode on: the template itself still gets through"     || fail "S39x the armed gate denies the very shape the mode asks for"
+
+  # A denial must cite the MODE, not the level. "LEVEL 1: the limit is 0"
+  # would be a plain lie -- level 1 has no limit -- and a rule the model
+  # cannot find in its context is a rule it will argue with.
+  printf 'const hash = await bcrypt.hash(password, 10);
+await db.users.insert({ email, hash });
+' > "$tmp/body.js"
+  node -e 'const fs=require("fs");process.stdout.write(JSON.stringify({tool_name:"Write",tool_input:{file_path:"src/z.js",content:fs.readFileSync(process.argv[1],"utf8")},hook_event_name:"PreToolUse"}))' "$tmp/body.js" > "$tmp/deny-in.json"
+  OUT=$(SOCRATIC_STATE_DIR="$tmp" bash "$SCRIPTS/hook-pre-tool.sh" < "$tmp/deny-in.json")
+  echo "$OUT" | grep -q "TEMPLATE MODE (level 1)" && pass "the denial cites the mode, not the level" || fail "S39y denial does not name the mode"
+  echo "$OUT" | grep -q "LEVEL 1:" && fail "S39y2 the denial claims level 1 has a limit, which it does not" || pass "the denial does not blame the level"
+
+  # The context must ANNOUNCE the armed gate. A model denied by a rule its
+  # own context never mentioned is a model that will retry the same write.
+  OUT=$(fire_pre "$tmp" "necesito el endpoint")
+  echo "$OUT" | grep -q "^authorship:" && pass "the context announces the authorship contract at level 1"     || fail "S39z no authorship line at level 1 with the mode on"
+  echo "$OUT" | grep -q "the gate is armed and will DENY a body"     && pass "and says the arming comes from the mode, not the level"     || fail "S39aa context does not explain where the arming comes from"
+
+  # ship must still outrank it. A mode the user switched on themselves must
+  # never become the thing they cannot get out of -- that is how a plugin
+  # gets uninstalled on a Friday.
+  SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/escape.ts" ship 10 "prod caido" >/dev/null 2>&1
+  V=$(gate_verdict "$tmp" "Write" "$BODY")
+  [[ "$V" == "allow" ]] && pass "an open escape disarms the mode too"     || fail "S39ab ship could not get the user out of template mode"
+  SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/escape.ts" --end >/dev/null 2>&1
+  SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/template.ts" off >/dev/null 2>&1
+
   # The documented template must be WRITABLE at the level it is documented
   # for. rules/template.md is prose and gate-tool.ts is code; nothing tied
   # them together, and the first draft's example was one executable

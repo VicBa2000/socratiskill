@@ -185,7 +185,7 @@ Invoke as `/socratiskill:socratic <arg>`.
 | `accept` | Apply the last automatic calibration suggestion |
 | `teach <topic>` | Activate Feynman mode (role inversion — you teach, Claude probes gaps) |
 | `endteach` | Close Feynman mode and print a gap summary |
-| `template [on\|off]` | "Pasame la plantilla, yo codifico." Claude hands over structure — real signature, numbered work order in comments, an anchor in your own repo, one flagged trap left open — and stops; you write the bodies. **Levels 1-3 only:** at L1 it overrides the level (which otherwise says Claude writes the code); at L2-L3 it only sets the shape of the skeletons those levels already hand over; at L4+ it is not injected at all, because there you already write everything and a template directive could only loosen your level. A delivery mode, not a level change: it does not move `global_level` and it does not relax the gate. |
+| `template [on\|off]` | "Pasame la plantilla, yo codifico." Claude hands over structure — real signature, numbered work order in comments, an anchor in your own repo, one flagged trap left open — and stops; you write the bodies. **Levels 1-3 only:** at L1 it overrides the level (which otherwise says Claude writes the code); at L2-L3 it only sets the shape of the skeletons those levels already hand over; at L4+ it is not injected at all, because there you already write everything and a template directive could only loosen your level. A delivery mode, not a level change: it never moves `global_level` and never loosens the contract — the only direction it can move it is tighter. **At L1 it arms the gate**, borrowing the authorship half of level 3's contract (zero executable statements, no editing existing files), so the promise is enforced rather than merely requested. `ship` still outranks it. |
 | `review` | Run one due Leitner card (spaced repetition) |
 | `journal [today\|week\|month]` | Generate a markdown rollup in `~/.claude/socratic/journal/` |
 | `reset` / `reset force` | Wipe all local socratic state (profile, journal, error-map, sessions, antipatterns). Bare `reset` prints a confirmation prompt; `reset force` invokes `uninstall.sh --purge` with its hardened path guards. Plugin itself stays installed — complete removal still needs `/plugin uninstall socratiskill`. |
@@ -625,7 +625,7 @@ Two complementary suites — together cover the pedagogical flow AND the
 threat model.
 
 ```bash
-bash tests/run-all.sh         # 39 scenarios, 308 assertions (functional)
+bash tests/run-all.sh         # 38 scenarios, 316 assertions (functional)
 bash tests/run-security.sh    #  8 scenarios, 40 assertions (adversarial)
 # flags for both: --only <N>, --stop-on-fail, --list
 ```
@@ -707,7 +707,7 @@ scripts/
 data/                  domains, prerequisites, technical terms, antipatterns,
                        roles, algorithm constants
 tests/
-  run-all.sh           39 scenarios, 308 assertions (functional)
+  run-all.sh           38 scenarios, 316 assertions (functional)
   run-security.sh      8 scenarios, 40 assertions (adversarial)
 sistemas.txt           full technical reference (rules, thresholds,
                        state files, hooks, every system)

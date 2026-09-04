@@ -29,7 +29,7 @@
  *   2  argumento invalido, o el modo ya estaba en ese estado
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs"
+import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from "node:fs"
 import { homedir } from "node:os"
 import { join, dirname } from "node:path"
 import { StateIO } from "./state-io"
@@ -115,6 +115,7 @@ function parseArgs(argv: string[]): "on" | "off" {
 function main(): void {
   const action = parseArgs(process.argv.slice(2))
   const sessionPath = join(stateDir(), "sessions", `${todayIso()}.json`)
+  const marker = join(stateDir(), ".template-active")
 
   // Serialized against record-turn, which writes the same file at the end
   // of every turn. Without the lock, turning the mode on during a busy
@@ -147,6 +148,23 @@ function main(): void {
 
     ensureDir(dirname(sessionPath))
     StateIO.writeJsonAtomic(sessionPath, doc)
+
+    // Fast-path marker for hook-pre-tool.sh, which runs on EVERY tool call
+    // and is written to fork nothing in the common case. Finding today's
+    // session file from bash would need UTC date math (a fork, and S34's
+    // invariant to get wrong); a zero-byte marker needs one `[[ -f ]]`.
+    //
+    // It is a HINT, never the truth. gate-tool.ts always re-reads the
+    // session doc, so a marker left behind by a session that ended
+    // yesterday costs one wasted bun start and cannot produce a wrong
+    // verdict. That asymmetry is what makes the duplication safe.
+    try {
+      if (action === "on") writeFileSync(marker, "")
+      else if (existsSync(marker)) unlinkSync(marker)
+    } catch {
+      // Best-effort: without the marker the gate is simply not armed from
+      // the fast path. Never fail the command over a cache file.
+    }
   })
 
   if (refusal) {
