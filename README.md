@@ -7,7 +7,7 @@
     ╚══════╝ ╚═════╝  ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝   ╚═╝╚══════╝╚═╝  ╚═╝╚═╝╚══════╝╚══════╝
     ──────────────────────────────────────────────────────────────────────────────────────
     ░▒▓█   A D A P T I V E   S O C R A T I C   M E N T O R   F O R   C L A U D E   █▓▒░
-                       >>  v0.5.3 · MIT · github.com/VicBa2000/socratiskill  <<
+                       >>  v0.5.4 · MIT · github.com/VicBa2000/socratiskill  <<
 ```
 
 # Socratiskill
@@ -661,7 +661,7 @@ write under interruption, concurrent RMW on `profile.json`,
 antipattern regex bounds, hostile stdin to the hooks, and topic
 injection (null bytes, RTL unicode, shell metacharacters).
 
-Combined: **366 assertions, all green** as of v0.5.3.
+Combined: **366 assertions, all green** as of v0.5.4.
 
 For a manual end-to-end in a live Claude Code session, see
 [MANUAL-TEST.md](./MANUAL-TEST.md).

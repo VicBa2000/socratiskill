@@ -7,8 +7,8 @@ per-turn detectors, domain taxonomy, antipatterns, Feynman mode,
 spaced repetition, hooks, persistent state, plugin states, and the
 authorship gate.
 
-Updated for v0.5.3 (September 2026): the pause-resurrection fix and
-the `template` delivery mode.
+Updated for v0.5.4 (September 2026): the `repair` command and the
+inconsistent-state detection it exposes.
 
 
 TABLE OF CONTENTS
@@ -36,6 +36,7 @@ TABLE OF CONTENTS
  12. Injection channels (hooks)
  13. Persistent state (files)
  14. Plugin states (enabled / paused / disabled / reset)
+       14.1 A fifth state: inconsistent (and `repair`)
  15. The authorship gate (v0.5)
        15.1 The mechanism
        15.2 The three layers (create-vs-edit, shape, budget)
@@ -828,6 +829,10 @@ Plugin control:
                             one-shot silencer on the first turn
                             after pause.
   resume                    reverse of pause
+  repair                    diagnose a state dir left inconsistent by a
+                            bug, and report the version ACTUALLY running
+                            (see section 14.1). Read-only; `--apply`
+                            performs the fix.
   reset [force]             full wipe of ~/.claude/socratic/.
                             `force` skips the confirmation.
 
@@ -1071,6 +1076,72 @@ Four states orthogonal to level/mode/hint:
   To uninstall completely:
     /plugin uninstall socratiskill
     /plugin marketplace remove socratiskill
+
+
+----------------------------------------------------------------
+14.1 A FIFTH STATE: INCONSISTENT (and `repair`)
+----------------------------------------------------------------
+
+scripts/profile-health.ts (detection), scripts/repair.ts (command).
+
+The four states above are the ones a USER chooses. This one a BUG
+produces, and it is the only one that looks exactly like a
+healthy state from inside a session.
+
+HOW IT HAPPENS. Until v0.5.3 the Stop hook wrote profile.json
+even while paused, rebuilding it from an empty object. That
+file has no global_level, so Axis.readLevel returns the default
+of 3 — and build-context then MIGRATES it, writing
+global_level: 3 for real. So the wrong level is persisted, not
+merely defaulted: it survives a restart and is indistinguishable
+from a calibration the user never performed. Meanwhile the real
+profile sits in profile.json.paused, and resume refuses to act
+with two profiles present.
+
+UPDATING THE PLUGIN DOES NOT FIX THIS. The code fix stops new
+damage; the residue on disk stays until something removes it.
+That distinction is the whole reason this section exists.
+
+THE ARTIFACT FINGERPRINT — all three required, because this
+enables a DELETION and a false positive costs a real calibration:
+  1. `last_user_message_length` present — written ONLY by
+     record-turn, so it is the positive signature of the Stop
+     hook having authored the file.
+  2. `calibration_completed !== true` — excludes anyone who ran
+     calibrate. Without this the test eats real profiles, since
+     a calibrated profile accumulates the key above too.
+  3. No init-profile key (mode, comprehension_speed,
+     copy_tendency, streak_days) — covers the user who never
+     calibrated but whose profile was still created properly.
+
+DIAGNOSES:
+  ok           nothing to do.
+  resurrected  both files, active one is an artifact. The only
+               case with an obvious right answer, so the only
+               one `--apply` resolves.
+  ambiguous    both files, active one holds real settings.
+               Refuses even with --apply (exit 3) and prints
+               both: choosing for the user here is the exact
+               mistake the command exists to prevent.
+  orphan       only the artifact; the .paused is already gone.
+               Nothing to restore, but the level on screen is
+               fictitious and must be said out loud.
+
+WHERE IT IS DETECTED. Not at install: install.sh is the legacy
+path and a plugin install never runs it. The only entry point
+that executes on every install route and every turn is
+build-context, so the warning is injected there — every turn
+while it lasts, immediately after the level line, because it is
+the one line in the block that revokes the authority of the
+others.
+
+THE RUNNING VERSION. `repair` always prints the version read
+from the manifest sitting next to the scripts being executed,
+even when there is nothing to repair. That is NOT what /plugin
+reports: /plugin says what the marketplace resolved, this says
+what is running, and the two diverge when an update did not
+refresh the installed copy. It is the first hypothesis to rule
+out whenever a shipped fix appears not to work.
 
 
 ================================================================
