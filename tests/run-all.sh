@@ -9,7 +9,7 @@
 #
 # Usage:
 #   bash tests/run-all.sh                 # run everything
-#   bash tests/run-all.sh --only <N>      # run only scenario N (1..38; 24 retired into 19/25/32)
+#   bash tests/run-all.sh --only <N>      # run only scenario N (1..39; 24 retired into 19/25/32)
 #   bash tests/run-all.sh --list          # list scenarios
 #   bash tests/run-all.sh --stop-on-fail  # abort on first FAIL
 #
@@ -1848,6 +1848,127 @@ if should_run 38; then
   [[ $? -eq 0 ]] && pass "an active profile is still updated"     || fail "S38d the Stop hook stopped recording on an active profile"
 
   teardown_state "$TMP"; teardown_state "$TMP2"
+fi
+
+## S39 template mode: the delivery the user asked for, and its telemetry
+if should_run 39; then
+  header "S39 template mode (pasame la plantilla, yo codifico)"
+
+  # WHY THIS EXISTS. Reported from real use: the user spent a whole
+  # project at level 1 typing every body himself, by asking for a
+  # skeleton in each individual turn. Two things were wrong with that.
+  #
+  #   1. It was a per-turn negotiation. Nothing in the plugin knew the
+  #      arrangement existed, so it had to be restated forever.
+  #   2. `user_wrote` — the one field that records that the CODE WAS
+  #      THEIRS — is only requested when the gate is armed, and level 1
+  #      does not arm it. So the turns where he did all the work are
+  #      exactly the turns that recorded user_wrote:null.
+  #
+  # Assert 39c is the important one: it is the difference between the
+  # plugin knowing who wrote the project and not knowing.
+
+  tmp=$(setup_state 39)
+  set_level "$tmp" 1
+
+  # Baseline: at level 1 the gate is disarmed, so nothing asks who wrote.
+  OUT=$(fire_pre "$tmp" "necesito el endpoint de registro")
+  echo "$OUT" | grep -q "user_wrote"     && fail "S39a level 1 requested user_wrote before the mode was on"     || pass "baseline: level 1 alone does not record who wrote the code"
+
+  OUT=$(SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/template.ts" on 2>&1)
+  echo "$OUT" | grep -q "template on" && pass "template on reports the switch"     || fail "S39b template on said: $OUT"
+
+  OUT=$(fire_pre "$tmp" "necesito el endpoint de registro")
+  echo "$OUT" | grep -q "user_wrote"     && pass "with the mode on, level 1 DOES record who wrote the code"     || fail "S39c user_wrote still absent at level 1 with template on"
+  echo "$OUT" | grep -q "TEMPLATE MODE" && pass "the per-turn directive is injected"     || fail "S39d no TEMPLATE MODE directive"
+  echo "$OUT" | grep -q "rules/level-1-implementer.md.*template.md"     && pass "template.md is loaded alongside the level's own rules"     || fail "S39e template.md not in the rules line"
+  # The directive has to override the level, not blend with it: level 1
+  # says "you write the code" three lines earlier in the same context.
+  echo "$OUT" | grep -q "OVERRIDES your level" && pass "stated as an override, not as advice"     || fail "S39f directive does not override the level"
+
+  # Turning it on twice is a no-op that says so, like pause/resume.
+  #
+  # ORDER MATTERS BELOW, do not reshuffle: this refused `on` followed by
+  # the `off` further down is the regression test for a real bug. The
+  # first draft called process.exit(2) from inside withLock, which skips
+  # the finally that unlinks the lock file. Since the stale-lock reclaim
+  # (5s) is longer than the acquire timeout (~2.5s), the next call did
+  # not wait it out — it threw. A refused `on` bricked the session file
+  # for five seconds. Separating the two asserts hides it.
+  OUT=$(SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/template.ts" on 2>&1); RC=$?
+  [[ $RC -eq 2 ]] && pass "a second 'on' exits 2 instead of resetting the counter"     || fail "S39g second on returned $RC"
+
+  # A turn under the mode counts.
+  fire_stop "$tmp" "aca va mi implementacion" "revisado
+<!-- HINT_META {\"topic\":\"bcrypt\",\"correct\":true,\"domain\":\"backend\",\"hintLevel\":3,\"user_wrote\":true} /HINT_META -->" > /dev/null
+  TODAY=$(date -u +%Y-%m-%d)
+  N=$(node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")); console.log(d.template ? d.template.turns : "absent")' "$tmp/sessions/$TODAY.json")
+  [[ "$N" == "1" ]] && pass "a turn under the mode is counted" || fail "S39h turns=$N, expected 1"
+  W=$(node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")); console.log(d.turns[d.turns.length-1].user_wrote)' "$tmp/sessions/$TODAY.json")
+  [[ "$W" == "true" ]] && pass "user_wrote:true survives into the turn record" || fail "S39i user_wrote=$W"
+
+  OUT=$(SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/status.ts" 2>&1)
+  echo "$OUT" | grep -q "template on" && pass "status reports the mode as an episode"     || fail "S39j status does not mention it"
+
+  OUT=$(SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/template.ts" off 2>&1)
+  echo "$OUT" | grep -q "template off" && pass "template off reports the switch" || fail "S39k off said: $OUT"
+  OUT=$(fire_pre "$tmp" "otra cosa")
+  echo "$OUT" | grep -q "TEMPLATE MODE" && fail "S39l directive survived the off"     || pass "the directive stops on off"
+
+  # --- the level boundary -------------------------------------------------
+  #
+  # WHY THIS HALF EXISTS. The first draft gated injection on the off ramp
+  # alone, so the mode fired at every level 1-5 with the SAME wording:
+  # "this OVERRIDES your level's delivery: hand over structure only".
+  # Read at level 5 -- which writes nothing and only asks questions -- that
+  # directive turns it into level 3. The mode could LOOSEN the axis, which
+  # is the one thing no pedagogical mode may ever do. rules/template.md
+  # said the right thing in prose the whole time; the injected note said
+  # the opposite, and the injected note is what the model reads.
+  #
+  # So: L1 overrides, L2-L3 shape only, L4+ not injected at all.
+
+  SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/template.ts" on >/dev/null 2>&1
+  set_level "$tmp" 3
+  OUT=$(fire_pre "$tmp" "necesito el endpoint")
+  echo "$OUT" | grep -q "TEMPLATE MODE" && pass "level 3: injected" || fail "S39m not injected at level 3"
+  echo "$OUT" | grep -q "does NOT change what your level lets you author" && pass "level 3: framed as shape, not as an override" || fail "S39n level 3 got the override wording"
+  echo "$OUT" | grep -q "OVERRIDES your level" && fail "S39o override wording leaked to level 3" || pass "level 3: no override wording"
+
+  # Level 5 writes nothing and directs nothing. Anything injected here can
+  # only give away more than the level allows.
+  set_level "$tmp" 5
+  OUT=$(fire_pre "$tmp" "necesito el endpoint")
+  echo "$OUT" | grep -q "TEMPLATE MODE" && fail "S39p mode injected at level 5 -- it can only loosen it" || pass "level 5: not injected at all"
+  echo "$OUT" | grep -q "^level: 5" && pass "level 5 still reports as level 5" || fail "S39q level 5 lost its identity"
+
+  # Turning it on where it does nothing has to SAY so, rather than leaving
+  # a switch the user believes is on.
+  SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/template.ts" off >/dev/null 2>&1
+  OUT=$(SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/template.ts" on 2>&1)
+  echo "$OUT" | grep -q "will not be injected" && pass "level 5: the command warns it is a no-op" || fail "S39r no warning above the boundary"
+
+  # The off ramp is the axis switched off -- not "a level above 5" -- so it
+  # gets its own sentence rather than "you already write everything".
+  set_level "$tmp" 6
+  SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/template.ts" off >/dev/null 2>&1
+  OUT=$(SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/template.ts" on 2>&1)
+  echo "$OUT" | grep -q "axis is off at level 6" && pass "level 6 is explained as the axis being off" || fail "S39s level 6 got the wrong explanation"
+  OUT=$(fire_pre "$tmp" "algo")
+  echo "$OUT" | grep -q "TEMPLATE MODE" && fail "S39t mode injected on the off ramp" || pass "not injected at level 6"
+
+  # The documented template must be WRITABLE at the level it is documented
+  # for. rules/template.md is prose and gate-tool.ts is code; nothing tied
+  # them together, and the first draft's example was one executable
+  # statement -- denied at level 3, whose definition is a budget of zero.
+  OUT=$(bun run "$PLUGIN_DIR/tests/fixtures/template-examples.ts" 2>&1)
+  if [[ $? -eq 0 ]]; then
+    pass "the documented templates survive the real gate at their levels"
+  else
+    fail "S39u template examples: $(echo "$OUT" | grep BROKEN | head -2)"
+  fi
+
+  teardown_state "$tmp"
 fi
 
 # ==========================================================================

@@ -146,6 +146,12 @@ const CALIBRATION_UP_BY_LEVEL: Record<string, CalibrationRule> =
 const CALIBRATION_DOWN_BY_LEVEL: Record<string, CalibrationRule> =
   ALGO.calibration_down_by_level ?? DEFAULT_DOWN_BY_LEVEL
 
+/** Template delivery mode. See scripts/template.ts. */
+interface TemplateState {
+  started_at: string
+  turns: number
+}
+
 interface SessionDoc {
   date: string
   turns: TurnRecord[]
@@ -154,6 +160,7 @@ interface SessionDoc {
   feynman?: FeynmanState
   feynman_summaries?: FeynmanSummary[]
   handoff?: HandoffState
+  template?: TemplateState
 }
 
 interface PendingCalibration {
@@ -576,6 +583,11 @@ function main(): void {
   // waiting on the user, and the protocol quietly degrades into "frame
   // everything, then chat".
   applyHandoff(doc, meta?.handoff)
+
+  // Count turns spent in template mode. It is what the context line
+  // reports back ("ON since X, N turns") and, unlike a timestamp, it
+  // says how much of the session actually ran under the mode.
+  if (doc.template) doc.template.turns += 1
 
   if (!doc.hint_state) {
     doc.hint_state = HintState.createInitialState(HintState.clampUserLevel(level))

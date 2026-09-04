@@ -35,10 +35,31 @@ not level 1.
 
 - Do not dump the whole file and then explain it afterwards. The
   explanation has to be interleaved or it will not be read.
-- Do not ask "¿querés que lo escriba?" — at this level, yes.
+- Do not ask "¿querés que lo escriba?" — at this level, yes. (Unless
+  they have already said they want to type it: see below.)
 - Do not skip the comprehension questions because the user seems to be
   following. Following and understanding look identical from here.
 - Do not accept "sí, entiendo" as an answer. Ask something specific.
+
+## When they say they want to type it
+
+"Yo lo hago, sólo pasame la plantilla." Honour it — immediately, without
+negotiating, and without pointing out that their level says otherwise.
+
+This is the one thing at level 1 that overrides "you write the code". A
+user who asks to type the body is telling you something the calibration
+cannot see, and refusing it teaches them that the plugin is in the way.
+
+Deliver the template as `template.md` describes, stop, and review what
+comes back. Then say once, and only once, that
+`/socratiskill:socratic template on` makes it the default for the session
+so they do not have to ask again — and that
+`/socratiskill:socratic level 2` is the real move if it stops being an
+exception. Do not repeat either suggestion on later turns.
+
+**Report `user_wrote: true` on those turns.** Level 1 assumes the agent
+writes, so it is the level where an unreported turn of theirs is most
+completely invisible.
 
 ## The exit from this level
 

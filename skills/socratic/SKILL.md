@@ -1,7 +1,7 @@
 ---
 name: socratic
 description: Adaptive socratic mentor entry point. Invoked as /socratiskill:socratic to view the current level on the pedagogical axis, change it, or inspect which rules are active. For automatic per-turn injection, the plugin's UserPromptSubmit hook handles it outside this skill.
-argument-hint: "[status | on | off | pause | resume | calibrate | level <1-5> | ship [minutes] <reason> | drill [analyze <file>|build|fix <file>|status|done|cancel] | hint | faster | slower | challenge | accept | teach <topic> | endteach | review | journal [today|week|month] | reset [force]]"
+argument-hint: "[status | on | off | pause | resume | calibrate | level <1-5> | ship [minutes] <reason> | drill [analyze <file>|build|fix <file>|status|done|cancel] | hint | faster | slower | challenge | accept | teach <topic> | endteach | template [on|off] | review | journal [today|week|month] | reset [force]]"
 allowed-tools: [Read, Write, Bash]
 ---
 
@@ -161,6 +161,27 @@ first word:
   harvests it). Run `bun run <plugin-root>/scripts/end-teach.ts` and
   show stdout. If no teach session is active, exit 2 with stderr.
 
+- `template [on|off]` -> Turn the template delivery mode on or off for
+  today's session. "Pasame la plantilla, yo codifico": the agent hands
+  over structure — real signature, numbered work order in comments, an
+  anchor in the user's own repo, one flagged trap — and stops; the user
+  writes the bodies. Run `bun run <plugin-root>/scripts/template.ts <on|off>`
+  and show stdout. Exit 2 = already in that state (stderr says so).
+
+  It is a DELIVERY mode, not a level: it does not touch `global_level`
+  and it does not relax the gate. Its reason for existing is level 1,
+  where the level says the agent writes and a user who would rather type
+  the bodies had to ask for it again every single turn — and, because
+  level 1 does not arm the gate, `user_wrote` was never even recorded.
+
+  **It applies at levels 1-3 only.** At L1 it overrides the level; at
+  L2-L3 it only sets the shape of the skeletons those levels already
+  deliver; at L4 and above the hook does not inject it at all, because
+  the user already writes everything there and the directive could only
+  loosen the level — "hand over structure" read at level 5 would turn it
+  into a level 3. Running `template on` above level 3 reports that it
+  changes nothing. See `rules/template.md`.
+
 - `review` -> Execute a spaced-repetition card. Run
   `bun run <plugin-root>/scripts/pick-review.ts`. If the first stdout
   line starts with "no review cards due", respond with that exact
@@ -204,7 +225,7 @@ first word:
 For anything else, respond:
 ```
 unknown subcommand: <args>
-valid: status | on | off | pause | resume | calibrate | level <1-5> | ship [minutes] <reason> | drill [analyze <file>|build|fix <file>|status|done|cancel] | hint | faster | slower | challenge | accept | teach <topic> | endteach | review | journal [today|week|month] | reset [force]
+valid: status | on | off | pause | resume | calibrate | level <1-5> | ship [minutes] <reason> | drill [analyze <file>|build|fix <file>|status|done|cancel] | hint | faster | slower | challenge | accept | teach <topic> | endteach | template [on|off] | review | journal [today|week|month] | reset [force]
 ```
 
 ## The axis (see rules/)

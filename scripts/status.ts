@@ -2,14 +2,14 @@
  * status.ts — the single control panel.
  *
  * v0.4 answered "what is my setup?" across four places: the level, the
- * mode, whether immersive was on, and whether a scaffold window was
+ * mode, whether immersive was on, and whether a template window was
  * open. A user who wanted less help had to know which of those to move.
  * There is one axis now, so there is one place to read it.
  *
  * Three sections, in the order a user actually asks about them:
  *
  *   THE AXIS      what level, what that means, what you may author
- *   EPISODE       drill / feynman / review, if one is running
+ *   EPISODE       drill / feynman / template / review, if one is running
  *   TODAY         budget spent, escapes, and the autonomy number
  *
  * The autonomy line is deliberately plain: no badges, no streaks, no
@@ -128,6 +128,12 @@ function main(): void {
   if (feynman) {
     const gaps = Array.isArray(feynman["gaps"]) ? (feynman["gaps"] as unknown[]).length : 0
     episodes.push(`feynman teaching "${feynman["topic"]}" (${gaps} gap(s) logged)`)
+  }
+
+  const template = session["template"] as Record<string, unknown> | undefined
+  if (template) {
+    const turns = Number(template["turns"] ?? 0) || 0
+    episodes.push(`template on (${turns} turn(s)) — you write the bodies`)
   }
 
   const handoff = session["handoff"] as Record<string, unknown> | undefined

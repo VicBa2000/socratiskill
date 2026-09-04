@@ -184,7 +184,8 @@ Invoke as `/socratiskill:socratic <arg>`.
 | `challenge` | Anti-adulation mode for 1 turn (no flattery, harder answers) |
 | `accept` | Apply the last automatic calibration suggestion |
 | `teach <topic>` | Activate Feynman mode (role inversion — you teach, Claude probes gaps) |
-| `endteach` | Close Feynman mode and print a gap summary ||off]` | "Pasame la plantilla, yo codifico." Claude hands over structure — real signature, numbered work order in comments, an anchor in your own repo, one flagged trap left open — and stops; you write the bodies. A delivery mode, not a level: it does not move `global_level` and it does not relax the gate. Its reason for existing is **level 1**, where the level says the agent writes, and where `user_wrote` was previously never recorded at all. |
+| `endteach` | Close Feynman mode and print a gap summary |
+| `template [on\|off]` | "Pasame la plantilla, yo codifico." Claude hands over structure — real signature, numbered work order in comments, an anchor in your own repo, one flagged trap left open — and stops; you write the bodies. **Levels 1-3 only:** at L1 it overrides the level (which otherwise says Claude writes the code); at L2-L3 it only sets the shape of the skeletons those levels already hand over; at L4+ it is not injected at all, because there you already write everything and a template directive could only loosen your level. A delivery mode, not a level change: it does not move `global_level` and it does not relax the gate. |
 | `review` | Run one due Leitner card (spaced repetition) |
 | `journal [today\|week\|month]` | Generate a markdown rollup in `~/.claude/socratic/journal/` |
 | `reset` / `reset force` | Wipe all local socratic state (profile, journal, error-map, sessions, antipatterns). Bare `reset` prints a confirmation prompt; `reset force` invokes `uninstall.sh --purge` with its hardened path guards. Plugin itself stays installed — complete removal still needs `/plugin uninstall socratiskill`. |
@@ -624,7 +625,7 @@ Two complementary suites — together cover the pedagogical flow AND the
 threat model.
 
 ```bash
-bash tests/run-all.sh         # 37 scenarios, 287 assertions (functional)
+bash tests/run-all.sh         # 39 scenarios, 308 assertions (functional)
 bash tests/run-security.sh    #  8 scenarios, 40 assertions (adversarial)
 # flags for both: --only <N>, --stop-on-fail, --list
 ```
@@ -706,7 +707,7 @@ scripts/
 data/                  domains, prerequisites, technical terms, antipatterns,
                        roles, algorithm constants
 tests/
-  run-all.sh           37 scenarios, 287 assertions (functional)
+  run-all.sh           39 scenarios, 308 assertions (functional)
   run-security.sh      8 scenarios, 40 assertions (adversarial)
 sistemas.txt           full technical reference (rules, thresholds,
                        state files, hooks, every system)

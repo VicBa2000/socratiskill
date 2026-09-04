@@ -331,6 +331,82 @@
 
 
   ------------------------------------------------------------------
+  2.55 YOU TYPE IT: `template on` / `template off`
+  ------------------------------------------------------------------
+  "Pasame la plantilla, yo codifico." The agent hands over structure
+  and stops; the bodies are yours.
+
+    /socratiskill:socratic template on
+        ... every turn from here delivers a skeleton, not an
+            implementation, until you turn it off ...
+    /socratiskill:socratic template off
+
+  What a template contains: a real signature (plumbing is not what you
+  are practising), numbered steps in the order you will write them, an
+  anchor to something you already solved in THIS repo, one trap named
+  and left open, and `...` where the body goes.
+
+    app.post('/register', /* completa la firma: sync o async? */ (req, res) => {
+      // 1. sacar { email, password } de req.body
+      //    (mismo patron que usaste en POST /links con { url })
+      // 2. validar que ambos vengan -> si falta alguno, 400 y cortar
+      // 3. hashear el password con bcrypt
+      //    OJO: bcrypt.hash(...) devuelve una Promise, no el hash
+      //    directo. Eso cambia la firma de arriba - pensalo.
+      ...
+    });
+
+  Then it stops. It does not narrate what you are about to write, and
+  it does not resolve the trap it just flagged.
+
+  It is a DELIVERY mode, not a level: it does not touch your level and
+  it does not relax the gate. It exists for LEVEL 1, where the level
+  says the agent writes the code -- so a user who would rather type had
+  to ask for it again in every single turn, and, because level 1 does
+  not arm the gate, the plugin never even recorded that the code was
+  theirs.
+
+  IT ONLY APPLIES AT LEVELS 1-3, and that boundary is the point:
+
+    L1        OVERRIDE. The level says the agent writes; you said you
+              would rather type. The mode wins.
+    L2-L3     SHAPE ONLY. These levels already hand you skeletons. The
+              mode sets what a good one looks like. It does not let the
+              agent author one extra line.
+    L4-L6     NOT INJECTED AT ALL. You already write everything at
+              those levels (L4 gives "not even a skeleton", L5 only
+              asks questions, L6 is the axis off). Anything injected
+              there could only LOOSEN your level -- "hand over
+              structure" read at level 5 would turn it into a level 3.
+              Turning it on there tells you it does nothing.
+
+  The FORM of the template changes with the level, because the gate
+  counts executable statements and does not care that you were being
+  pedagogical. The Express block above is one statement: fine at L1
+  (unlimited) and L2 (8 per file), DENIED at L3, whose definition is a
+  budget of zero. At L3 the same six parts arrive as a declaration --
+  the numbered work order above the signature, no body to fill:
+
+    import type { Request, Response } from "express"
+
+    // TODO(user): el handler de POST /register.
+    // 1. sacar { email, password } de req.body
+    //    (mismo patron que usaste en POST /links con { url })
+    // 2. validar que ambos vengan -> si falta alguno, 400 y cortar
+    // 3. hashear el password con bcrypt
+    //    OJO: bcrypt.hash(...) devuelve una Promise, no el hash
+    //    directo. Eso cambia el tipo de retorno de abajo - pensalo.
+    export function registerHandler(req: Request, res: Response): void
+
+  Both forms are run through the real gate by the test suite, so the
+  documentation cannot drift into promising a template the gate denies.
+
+  You can also just ask ("pasame la plantilla, yo lo escribo") without
+  turning anything on. At level 1 that is honoured for the turn; the
+  command is what makes it last.
+
+
+  ------------------------------------------------------------------
   2.6 SPACED REPETITION: `review`
   ------------------------------------------------------------------
     /socratiskill:socratic review
@@ -1009,7 +1085,7 @@
   sistemas.txt         full technical reference — every rule, threshold,
                        state file, hook, detector, protocol block
   MANUAL-TEST.md       step-by-step end-to-end test plan (7 scenarios)
-  tests/run-all.sh     functional test suite (38 scenarios, 300 assertions)
+  tests/run-all.sh     functional test suite (39 scenarios, 308 assertions)
   tests/run-security.sh adversarial test suite (8 scenarios, 40 asserts)
   hooks/hooks.json     plugin manifest hook declarations
   CLAUDE.md            contributor-oriented technical notes

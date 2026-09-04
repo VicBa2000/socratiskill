@@ -215,6 +215,18 @@ const BANNED: Banned[] = [
     roots: ["skills", "hooks"],
   },
   {
+    // v0.4 had a user-granted "scaffold window", retired in v0.5.0 —
+    // migrate-profile.ts still tells upgrading users it disappeared. The
+    // delivery mode added later ("pasame la plantilla, yo codifico") was
+    // first drafted under that same name, which would have shipped a
+    // subcommand whose name the migration notice calls dead. It is
+    // `template` for that reason. Note \b does not match "scaffolding",
+    // so axis.md's "worth scaffolding" wording stays legal.
+    pattern: /\bscaffold\b/i,
+    why: "the v0.4 scaffold window was retired in v0.5.0; the delivery mode is `template`",
+    roots: ["skills", "hooks"],
+  },
+  {
     pattern: /ship\s+<reason>\s*\[minutes\]/i,
     why: "the minutes come FIRST; this form silently swallows the number into the reason",
     roots: ["skills", "README.md", "QUICKSTART.txt", "MANUAL-TEST.md"],

@@ -88,12 +88,24 @@ interface HandoffStateLite {
   opened_at: string
 }
 
+/**
+ * "Pasame la plantilla, yo codifico." A delivery mode, not a level: the
+ * agent hands over structure and the user types the bodies. Session-
+ * scoped for the same reason as the two above — a mode declared on
+ * Tuesday must not still be on come Thursday without being said again.
+ */
+interface TemplateStateLite {
+  started_at: string
+  turns: number
+}
+
 interface SessionDocLite {
   date: string
   hint_state?: HintState.State
   feynman?: FeynmanStateLite
   drill?: DrillStateLite
   handoff?: HandoffStateLite
+  template?: TemplateStateLite
 }
 
 interface ErrorMapEntry {
@@ -274,6 +286,26 @@ function main(): void {
   const session = readTodaySession()
   const hintState = session?.hint_state ?? null
   const feynman = session?.feynman ?? null
+  // Off-ramp excepted: at level 6 the axis is off and a delivery mode has
+  // nothing to deliver. Everywhere else the mode is the user's to declare.
+  // The mode is only injected where handing over a skeleton is MORE
+  // restrictive than what the level already delivers:
+  //
+  //   L1     the level says the agent writes the code. The mode overrides
+  //          that. This is its whole reason for existing.
+  //   L2-L3  the level already hands over skeletons. The mode sets their
+  //          shape; it does not change who writes what.
+  //   L4+    the user already writes everything — L4 produces "not even a
+  //          skeleton of one", L5 only asks questions, L6 is the axis off.
+  //          A note here could ONLY loosen the level: an injected "hand
+  //          over structure" turns L5 into L3. So nothing is injected.
+  //
+  // The last case is not hypothetical. The first draft gated this on the
+  // off ramp alone, and a user at level 5 with the mode on got a directive
+  // reading "this OVERRIDES your level's delivery: hand over structure" —
+  // the exact opposite of what level 5 is.
+  const TEMPLATE_MAX_LEVEL = 3
+  const template = level <= TEMPLATE_MAX_LEVEL ? (session?.template ?? null) : null
   const handoff = session?.handoff ?? null
 
   const activeAntipatterns = Antipatterns.getActive(Antipatterns.readState())
@@ -369,6 +401,7 @@ function main(): void {
   // model to invent one.
   if (armed && spec.handoff !== "none") ruleExtras.push("handoff.md")
   if (feynman) ruleExtras.push("feynman.md")
+  if (template) ruleExtras.push("template.md")
   if (activeAntipatterns.length > 0) ruleExtras.push("antipatterns.md")
   const rulesSuffix = ruleExtras.length > 0 ? " + " + ruleExtras.join(" + ") : ""
   lines.push(`rules: follow skills/socratic/rules/${spec.rules} + axis.md + ladder.md${rulesSuffix}`)
@@ -382,6 +415,10 @@ function main(): void {
 
   if (feynman) {
     lines.push(`feynman: teaching "${feynman.topic}" since ${feynman.started_at} (${feynman.gaps.length} gaps logged)`)
+  }
+
+  if (template) {
+    lines.push(`template: ON since ${template.started_at} (${template.turns} turn(s)) — the user writes the bodies`)
   }
 
   const drill = session?.drill ?? null
@@ -492,6 +529,24 @@ function main(): void {
   if (feynman) {
     lines.push(
       `note: FEYNMAN MODE — the USER is the teacher of "${feynman.topic}". Do NOT explain, do NOT fill gaps. Probe with concrete examples, edge cases, and "why not X". See skills/socratic/rules/feynman.md. User must run /socratiskill:socratic endteach to exit.`,
+    )
+  }
+  if (template) {
+    // Two wordings, because the mode means two different things. At L1 it
+    // contradicts the level and has to say so out loud, or the level's own
+    // "at this level, yes, write it" wins. At L2-L3 the level ALREADY
+    // hands over skeletons, so an "override" framing would be an invitation
+    // to give away more than the level allows — there it only sets shape.
+    const shared =
+      "hand over structure only (real signature, numbered work order in comments, an anchor in their own repo, " +
+      "one flagged trap left open, `...` where the body goes) and then STOP. Do not write the body, do not " +
+      "transliterate it into comments, do not resolve the trap you flagged. When they come back with code, review " +
+      "it against your numbered steps by number and report user_wrote in HINT_META. " +
+      "See skills/socratic/rules/template.md. User exits with /socratiskill:socratic template off."
+    lines.push(
+      level === Axis.MIN_LEVEL
+        ? `note: TEMPLATE MODE — the user has asked to write the bodies. This OVERRIDES your level's delivery: ${shared}`
+        : `note: TEMPLATE MODE — this does NOT change what your level lets you author; it is the SHAPE of the skeleton you already hand over. Within that: ${shared}`,
     )
   }
   if (drill) {
@@ -627,7 +682,13 @@ function main(): void {
   if (diag) {
     lines.push(`  diagnostic  (REQUIRED this turn — diagnostic mode is active) "pass" | "fail" | null. pass = the user's answer demonstrated level-${diag.target_level} understanding; fail = it did not; null = off-topic / not applicable this turn.`)
   }
-  if (armed) {
+  if (armed || template) {
+    // Asked whenever the user is the one expected to produce code. Before
+    // template existed this was gated on `armed` alone, which excluded
+    // level 1 — so a user who typed every line of a project while sitting
+    // at level 1 left behind a run of turns all recording user_wrote:null.
+    // The one field that measures what the axis is FOR was absent exactly
+    // where the user had opted into doing the work.
     lines.push(
       '  user_wrote  (REQUIRED at this level) true | false | null. true if the USER produced or modified code this turn (pasted it, described what they wrote, or said they implemented it); false if the turn passed with no code produced by them; null if not applicable (planning, questions, analysis).',
     )

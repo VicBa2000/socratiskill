@@ -22,7 +22,9 @@ A thirty-line config object is yours.
 - Create the files. Frame the modules: imports, types, signatures, the
   wiring between them, and the bodies that are pure plumbing.
 - Leave every load-bearing body empty with a `TODO` naming what goes
-  there and what must be true when it works.
+  there and what must be true when it works. `template.md` describes the
+  shape of a body-less delivery that is actually worth typing into —
+  numbered steps, an anchor in their own repo, one trap left open.
 - Hand off **one module at a time** (see `handoff` below). Do not frame
   the whole feature and then walk away.
 - Give a rung-4 or rung-5 explanation for the part you are handing over:

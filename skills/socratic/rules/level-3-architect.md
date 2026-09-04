@@ -21,7 +21,9 @@ writing a line that does something, you are at the wrong level.
 
 - Create the file skeleton: imports, types/interfaces, function and
   method signatures with real names and real types, and a `TODO` in each
-  body saying what it must do.
+  body saying what it must do. See `template.md` for the six parts that
+  separate a template someone can start from a `TODO` they have to
+  decode.
 - Decompose at rung 3: break the work into 2-4 ordered units and hand
   over **one**. Do not solve the first to "show the pattern" — that is
   the most common way this level leaks into a solution.
