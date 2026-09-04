@@ -1,7 +1,7 @@
 ---
 name: socratic
 description: Adaptive socratic mentor entry point. Invoked as /socratiskill:socratic to view the current level on the pedagogical axis, change it, or inspect which rules are active. For automatic per-turn injection, the plugin's UserPromptSubmit hook handles it outside this skill.
-argument-hint: "[status | on | off | pause | resume | calibrate | level <1-5> | ship [minutes] <reason> | drill [analyze <file>|build|fix <file>|status|done|cancel] | hint | faster | slower | challenge | accept | teach <topic> | endteach | template [on|off] | review | journal [today|week|month] | reset [force]]"
+argument-hint: "[status | on | off | pause | resume | repair | calibrate | level <1-5> | ship [minutes] <reason> | drill [analyze <file>|build|fix <file>|status|done|cancel] | hint | faster | slower | challenge | accept | teach <topic> | endteach | template [on|off] | review | journal [today|week|month] | reset [force]]"
 allowed-tools: [Read, Write, Bash]
 ---
 
@@ -71,6 +71,18 @@ first word:
   turn. Run `bash <plugin-root>/scripts/resume.sh` and show stdout
   verbatim. Both `pause` and `resume` are idempotent: invoking them
   twice in a row is a no-op the second time.
+
+- `repair` -> Diagnose and fix a state dir left inconsistent by a bug, and
+  report which version of the plugin is ACTUALLY executing (not what
+  `/plugin` reports — those differ when an update did not refresh the
+  installed copy, and that difference is the first thing to rule out when
+  a fix "did not work"). Run `bun run <plugin-root>/scripts/repair.ts`
+  and show stdout verbatim. It changes NOTHING on this first call.
+  If it reports something to fix, ask the user for confirmation, and only
+  then run `bun run <plugin-root>/scripts/repair.ts --apply` and show
+  stdout verbatim. Never pass `--apply` on the first invocation, even if
+  the user's phrasing sounds pre-approved: this deletes a profile, and
+  the command exists because the plugin already damaged their state once.
 
 - `level <1-5>` -> Update `global_level` in `~/.claude/socratic/profile.json`.
   Respond:
@@ -225,7 +237,7 @@ first word:
 For anything else, respond:
 ```
 unknown subcommand: <args>
-valid: status | on | off | pause | resume | calibrate | level <1-5> | ship [minutes] <reason> | drill [analyze <file>|build|fix <file>|status|done|cancel] | hint | faster | slower | challenge | accept | teach <topic> | endteach | template [on|off] | review | journal [today|week|month] | reset [force]
+valid: status | on | off | pause | resume | repair | calibrate | level <1-5> | ship [minutes] <reason> | drill [analyze <file>|build|fix <file>|status|done|cancel] | hint | faster | slower | challenge | accept | teach <topic> | endteach | template [on|off] | review | journal [today|week|month] | reset [force]
 ```
 
 ## The axis (see rules/)

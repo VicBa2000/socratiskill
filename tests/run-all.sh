@@ -1971,6 +1971,117 @@ if should_run 39; then
   teardown_state "$tmp"
 fi
 
+
+## S40 repair: the residue a bug leaves on disk, which no code fix removes
+if should_run 40; then
+  header "S40 repair (fixing the code does not fix the disk)"
+
+  # WHY THIS EXISTS. B1 stopped the Stop hook from resurrecting
+  # profile.json during a pause, but every machine that already hit the
+  # bug kept TWO profiles on disk: the real one parked in
+  # profile.json.paused, and an artifact the hook built from an empty
+  # object. That artifact has no global_level, so the axis reads the
+  # default of 3 -- and build-context MIGRATES it, writing global_level:3
+  # for real. The wrong level is therefore persistent, survives a
+  # restart, and looks exactly like a calibration nobody performed.
+  # Updating the plugin does not touch it, and resume refuses to act with
+  # two profiles present, so the user is left with no supported way out.
+  #
+  # The asserts are ordered by what they protect: first that the broken
+  # state is RECOGNISED, then that nothing is applied without being
+  # asked, then -- the ones that matter most -- that a legitimate profile
+  # is never mistaken for the artifact.
+
+  ART='{"last_active":"2026-09-04T18:48:11.757Z","last_user_message_length":19,"global_level":3,"schema_version":2}'
+  REAL='{"global_level":1,"calibration_completed":true,"calibration_date":"2026-08-01T00:00:00Z","enabled":true}'
+
+  tmp="${TEST_ROOT}/state-repair"; mkdir -p "$tmp/sessions"
+  printf '%s' "$REAL" > "$tmp/profile.json.paused"
+  printf '%s' "$ART"  > "$tmp/profile.json"
+
+  # Recognition. The diagnosis must name the PAUSED level, not the
+  # artifact one -- that is the number the user is trying to get back.
+  OUT=$(SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/repair.ts" 2>&1); RC=$?
+  echo "$OUT" | grep -q "two profiles on disk" && pass "the resurrected state is recognised" || fail "S40a not recognised"
+  echo "$OUT" | grep -q "at level 1" && pass "names the level being restored" || fail "S40b did not name the paused level"
+  [[ "$RC" -eq 1 ]] && pass "exits 1 while something is still unrepaired" || fail "S40c wrong exit $RC"
+
+  # The version actually executing. /plugin reports what the marketplace
+  # resolved; a stale installed copy makes those differ, and that is the
+  # first thing to rule out when a fix did not work.
+  echo "$OUT" | grep -q "^running: v" && pass "reports the version actually executing" || fail "S40d no running version"
+
+  # A DIAGNOSIS MUST NOT MUTATE. This command deletes a profile, and it
+  # exists because the plugin already damaged this user state once.
+  [[ -f "$tmp/profile.json" && -f "$tmp/profile.json.paused" ]] && pass "the diagnosis alone changes nothing" || fail "S40e diagnosis mutated state"
+
+  OUT=$(SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/repair.ts" --apply 2>&1); RC=$?
+  [[ "$RC" -eq 0 ]] && pass "--apply succeeds" || fail "S40f apply exit $RC"
+  [[ ! -f "$tmp/profile.json.paused" ]] && pass "the paused file is consumed" || fail "S40g paused file survived"
+  LVL=$(node -pe 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).global_level' "$tmp/profile.json")
+  [[ "$LVL" == "1" ]] && pass "the real level is restored" || fail "S40h restored level $LVL, expected 1"
+
+  # Restoring is only half of it: the pause silencer is a one-shot, and
+  # surviving the repair would tell the model to ignore the plugin on the
+  # very turn it comes back.
+  [[ ! -f "$tmp/.pause-silencer-pending" ]] && pass "the stale pause silencer is cleared" || fail "S40i silencer survived"
+  OUT=$(SOCRATIC_STATE_DIR="$tmp" bun run "$SCRIPTS/repair.ts" 2>&1)
+  echo "$OUT" | grep -q "nothing to repair" && pass "repair is idempotent" || fail "S40j not idempotent"
+
+  # --- the safety half: what must NEVER be deleted ---------------------
+
+  # The user recalibrated during the pause, so BOTH files hold real
+  # settings. Choosing for them is the exact mistake this command exists
+  # to avoid, so it must refuse even when explicitly told to apply.
+  tmp2="${TEST_ROOT}/state-repair-amb"; mkdir -p "$tmp2"
+  printf '%s' "$REAL" > "$tmp2/profile.json.paused"
+  printf '%s' '{"global_level":4,"calibration_completed":true,"last_active":"2026-09-04T00:00:00Z","last_user_message_length":20}' > "$tmp2/profile.json"
+  OUT=$(SOCRATIC_STATE_DIR="$tmp2" bun run "$SCRIPTS/repair.ts" --apply 2>&1); RC=$?
+  [[ "$RC" -eq 3 ]] && pass "ambiguous state refuses to auto-resolve" || fail "S40k ambiguous exit $RC, expected 3"
+  [[ -f "$tmp2/profile.json" && -f "$tmp2/profile.json.paused" ]] && pass "--apply deleted nothing when ambiguous" || fail "S40l ambiguous state was mutated"
+
+  # A profile created by init-profile.sh and then USED carries last_active
+  # and last_user_message_length too, and calibration_completed is false.
+  # Only the init-profile fingerprint keys tell it apart from the
+  # artifact. Get this wrong and repair eats the profile of every user who
+  # never ran calibrate.
+  tmp3="${TEST_ROOT}/state-repair-init"; mkdir -p "$tmp3"
+  SOCRATIC_STATE_DIR="$tmp3" bash "$SCRIPTS/init-profile.sh" >/dev/null
+  node -e '
+    const fs=require("fs"); const f=process.argv[1];
+    const p=JSON.parse(fs.readFileSync(f,"utf8"));
+    p.last_active="2026-09-04T00:00:00Z"; p.last_user_message_length=42;
+    fs.writeFileSync(f, JSON.stringify(p,null,2));
+  ' "$tmp3/profile.json"
+  OUT=$(SOCRATIC_STATE_DIR="$tmp3" bun run "$SCRIPTS/repair.ts" --apply 2>&1)
+  [[ -f "$tmp3/profile.json" ]] && pass "an uncalibrated but legitimate profile is left alone" || fail "S40m repair deleted a real profile"
+  echo "$OUT" | grep -q "nothing to repair" && pass "and is reported as healthy" || fail "S40n misdiagnosed a healthy profile"
+
+  # A calibrated profile is the common case and must never look broken.
+  tmp4="${TEST_ROOT}/state-repair-ok"; mkdir -p "$tmp4/sessions"
+  printf '%s' '{"global_level":2,"calibration_completed":true,"last_active":"2026-09-04T00:00:00Z","last_user_message_length":11,"enabled":true,"schema_version":2}' > "$tmp4/profile.json"
+  OUT=$(SOCRATIC_STATE_DIR="$tmp4" bun run "$SCRIPTS/repair.ts" 2>&1)
+  echo "$OUT" | grep -q "nothing to repair" && pass "a calibrated profile is healthy" || fail "S40o false positive on a real profile"
+
+  # --- the per-turn warning -------------------------------------------
+
+  # The whole harm is that a broken state looks IDENTICAL to a healthy one
+  # from inside the session: the context prints a level with full
+  # authority. The warning has to ride along with it, and it must stay
+  # quiet when nothing is wrong.
+  tmp5="${TEST_ROOT}/state-repair-warn"; mkdir -p "$tmp5/sessions"
+  printf '%s' "$REAL" > "$tmp5/profile.json.paused"
+  printf '%s' "$ART"  > "$tmp5/profile.json"
+  OUT=$(fire_pre "$tmp5" "segui con el deploy")
+  echo "$OUT" | grep -q "STATE INCONSISTENT" && pass "the per-turn context warns while it is broken" || fail "S40p no warning injected"
+  echo "$OUT" | grep -q "repair" && pass "and names the command that fixes it" || fail "S40q warning without a remedy"
+  OUT=$(fire_pre "$tmp4" "segui con el deploy")
+  echo "$OUT" | grep -q "STATE INCONSISTENT" && fail "S40r warned about a healthy profile" || pass "silent when the state is healthy"
+
+  teardown_state "$tmp"; teardown_state "$tmp2"; teardown_state "$tmp3"
+  teardown_state "$tmp4"; teardown_state "$tmp5"
+fi
+
 # ==========================================================================
 summary
 [[ "$FAIL_COUNT" -eq 0 ]]

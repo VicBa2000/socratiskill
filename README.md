@@ -172,6 +172,7 @@ Invoke as `/socratiskill:socratic <arg>`.
 | `status` (or no args) | The whole control panel: the axis (level, what you may author, budget left, rung range), any episode in flight, and today's autonomy numbers |
 | `on` / `off` | Soft toggle of the `enabled` flag. When `off`, the hook still fires but injects only a short DISABLED silencer (~30 tokens) telling the model to behave as default Claude Code. |
 | `pause` / `resume` | **True bypass.** Renames `profile.json` ↔ `profile.json.paused` so the hook short-circuits before producing any output. Emits a one-shot silencer on the very first turn after pause (tells the model to forget skill instructions loaded earlier in the session), then **zero token cost per turn** until resume. Use when you want the plugin truly invisible without uninstalling. |
+| `repair` | Diagnose a state directory left inconsistent by a bug, and report **which version of the plugin is actually executing** — not what `/plugin` resolved, which differs when an update did not refresh the installed copy. Prints the diagnosis and changes nothing; `repair --apply` performs the fix, and only for the case with an unambiguous answer. When both profiles hold real settings it refuses and shows you both. |
 | `calibrate` | Self-assessment + level update. `calibrate force` to recalibrate. |
 | `level <1-5>` | Set the axis. This is the only pedagogical setting there is. |
 | `ship [minutes] <reason>` | Open a logged escape: Claude writes normally until it expires (default 10 min), then the level re-arms itself. A reason is required — it is the whole accountability mechanism. Never questioned or moralized about. The minutes go **first**: a trailing number is read as part of the reason, since in `ship fix issue 3` the 3 belongs to the reason. |
@@ -625,7 +626,7 @@ Two complementary suites — together cover the pedagogical flow AND the
 threat model.
 
 ```bash
-bash tests/run-all.sh         # 39 scenarios, 308 assertions (functional)
+bash tests/run-all.sh         # 40 scenarios, 326 assertions (functional)
 bash tests/run-security.sh    #  8 scenarios, 40 assertions (adversarial)
 # flags for both: --only <N>, --stop-on-fail, --list
 ```
@@ -660,7 +661,7 @@ write under interruption, concurrent RMW on `profile.json`,
 antipattern regex bounds, hostile stdin to the hooks, and topic
 injection (null bytes, RTL unicode, shell metacharacters).
 
-Combined: **348 assertions, all green** as of v0.5.3.
+Combined: **366 assertions, all green** as of v0.5.3.
 
 For a manual end-to-end in a live Claude Code session, see
 [MANUAL-TEST.md](./MANUAL-TEST.md).
@@ -707,7 +708,7 @@ scripts/
 data/                  domains, prerequisites, technical terms, antipatterns,
                        roles, algorithm constants
 tests/
-  run-all.sh           39 scenarios, 308 assertions (functional)
+  run-all.sh           40 scenarios, 326 assertions (functional)
   run-security.sh      8 scenarios, 40 assertions (adversarial)
 sistemas.txt           full technical reference (rules, thresholds,
                        state files, hooks, every system)

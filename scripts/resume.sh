@@ -48,8 +48,12 @@ if [[ -f "$PAUSED" && -f "$PROFILE" ]]; then
   # We refuse to overwrite either side because both may contain data
   # the user cares about.
   echo "[abort] cannot resume: both $PROFILE and $PAUSED exist." >&2
-  echo "        the active profile may have been recreated since pause." >&2
-  echo "        keep one and delete the other manually:" >&2
+  echo "        the active profile was recreated since pause." >&2
+  echo "" >&2
+  echo "        run this instead — it tells them apart and fixes the common case:" >&2
+  echo "          /socratiskill:socratic repair" >&2
+  echo "" >&2
+  echo "        or resolve it by hand:" >&2
   echo "          - keep current state, discard paused: rm $PAUSED" >&2
   echo "          - restore paused state, discard current: rm $PROFILE && mv $PAUSED $PROFILE" >&2
   exit 1

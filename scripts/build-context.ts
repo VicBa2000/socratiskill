@@ -23,6 +23,7 @@ import { HintState } from "./hint-state"
 import { Antipatterns } from "./antipatterns"
 import { Axis } from "./axis-state"
 import { Migrate } from "./migrate-profile"
+import { ProfileHealth } from "./profile-health"
 import { AutonomyReport } from "./autonomy-report"
 import { readFileSync, existsSync, unlinkSync } from "node:fs"
 import { homedir } from "node:os"
@@ -383,6 +384,22 @@ function main(): void {
   const lines: string[] = []
   lines.push("SOCRATIC CONTEXT")
   lines.push(`level: ${level} (${role}) — ${spec.summary}`)
+
+  // Un state dir inconsistente se ve EXACTAMENTE igual que uno sano: el
+  // nivel que se acaba de imprimir arriba puede ser un default que nadie
+  // eligio, escrito a disco por un bug. Ese es el daño real — no que el
+  // plugin se rompa, sino que siga andando con una autoridad que no
+  // tiene. Se avisa en cada turno mientras dure, porque el usuario no
+  // tiene forma de verlo desde adentro de la sesion.
+  //
+  // Va INMEDIATAMENTE despues de la linea de nivel, no al final: es la
+  // unica linea del bloque que desautoriza a las demas.
+  try {
+    const health = ProfileHealth.warning(ProfileHealth.inspect(stateDir()))
+    if (health) lines.push(health)
+  } catch {
+    // fail-open: un diagnostico que falla nunca puede costar el turno.
+  }
 
   if (offRamp) {
     lines.push("axis: OFF (level 6). No pedagogy this session.")
