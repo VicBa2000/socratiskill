@@ -1009,7 +1009,7 @@
   sistemas.txt         full technical reference — every rule, threshold,
                        state file, hook, detector, protocol block
   MANUAL-TEST.md       step-by-step end-to-end test plan (7 scenarios)
-  tests/run-all.sh     functional test suite (23 scenarios, 90 assertions)
+  tests/run-all.sh     functional test suite (38 scenarios, 300 assertions)
   tests/run-security.sh adversarial test suite (8 scenarios, 40 asserts)
   hooks/hooks.json     plugin manifest hook declarations
   CLAUDE.md            contributor-oriented technical notes

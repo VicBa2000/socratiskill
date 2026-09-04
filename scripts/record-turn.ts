@@ -496,9 +496,28 @@ function main(): void {
     return
   }
 
-  // Skill-level kill switch: if profile.enabled is explicitly false, skip all
-  // post-turn bookkeeping. Default is enabled (field absent = true).
-  const earlyProfile = readJson<Record<string, unknown>>(join(stateDir(), "profile.json"), {})
+  // Kill switch, in the two shapes it comes in.
+  //
+  //   paused  — pause.sh renames profile.json to profile.json.paused, so
+  //             there is no profile on disk. Every other entry point
+  //             (build-context, gate-tool, hook-pre-tool) already reads
+  //             "no profile" as "plugin not active" and returns. This one
+  //             did not: it fell through to readJson(..., {}) and wrote
+  //             the {} fallback back out at the end of the turn. That
+  //             resurrected an empty profile.json, which has no
+  //             global_level, which Axis.readLevel resolves to the
+  //             default of 3 — so a paused plugin came back armed at
+  //             level 3 on the very next turn, and resume.sh then refused
+  //             to restore anything because both files existed.
+  //
+  //   off     — enabled=false. The profile stays on disk; only the
+  //             bookkeeping is skipped.
+  //
+  // Nothing downstream of here may create profile.json. The Stop hook
+  // records what a session did; it does not decide that a session exists.
+  const profilePath = join(stateDir(), "profile.json")
+  if (!existsSync(profilePath)) return
+  const earlyProfile = readJson<Record<string, unknown>>(profilePath, {})
   if (earlyProfile["enabled"] === false) return
 
   const sessionId = input.session_id ?? "unknown"
@@ -573,7 +592,6 @@ function main(): void {
   if (meta) updateErrorMap(meta)
   Antipatterns.recordTurn(userText, agentText, new Date())
 
-  const profilePath = join(stateDir(), "profile.json")
   // Serialize profile read-modify-write against build-context (clears
   // challenge_next_turn) and accept-calibration (applies level change).
   // Without the lock, concurrent hooks lose each other's writes.

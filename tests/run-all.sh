@@ -9,7 +9,7 @@
 #
 # Usage:
 #   bash tests/run-all.sh                 # run everything
-#   bash tests/run-all.sh --only <N>      # run only scenario N (1..35; 24 retired into 19/25/32)
+#   bash tests/run-all.sh --only <N>      # run only scenario N (1..38; 24 retired into 19/25/32)
 #   bash tests/run-all.sh --list          # list scenarios
 #   bash tests/run-all.sh --stop-on-fail  # abort on first FAIL
 #
@@ -1787,6 +1787,67 @@ io.open(p,'w',encoding='utf-8',newline='').write(s.replace(a,b,1))
   R=$(surface_breaks "README.md" "Three layers, in the order they fire:" "Three layers, in the order they run:")
   [[ "$R" == "MISSED" ]] && pass "an unrelated doc edit does not trip it" \
     || fail "S37e the check fires on edits it should ignore"
+fi
+
+## S38 pause is a real bypass: no hook may resurrect the profile
+if should_run 38; then
+  header "S38 pause survives a full turn"
+
+  # WHY THIS EXISTS. Reported from real use: the plugin came back on its
+  # own after a pause, at level 3, "every time".
+  #
+  # pause.sh expresses "off" by renaming profile.json -> profile.json.paused,
+  # and three of the four entry points read a missing profile as "plugin
+  # not active" and return. The Stop hook did not: its kill switch only
+  # checked enabled===false, so a missing profile fell through to
+  # readJson(path, {}) and then wrote that {} back out at the end of the
+  # turn with last_active on it. The resurrected file has no global_level,
+  # Axis.readLevel(undefined) is 3, and the next UserPromptSubmit found an
+  # armed level-3 profile. resume.sh then refused to restore the real one,
+  # because both files existed.
+  #
+  # So the assert is not "record-turn skips bookkeeping" — it is that a
+  # paused state dir is byte-for-byte untouched by a turn, and that resume
+  # still works afterwards.
+  TMP="$(setup_state 38)"
+  mv "$TMP/profile.json" "$TMP/profile.json.paused"
+  : > "$TMP/.pause-silencer-pending"
+  # Snapshot excludes the two files the HARNESS itself makes: t.jsonl is
+  # the synthetic transcript, .hook-debug.log is opened by the shell
+  # wrapper before bun ever starts. Neither is socratic state.
+  snapshot() { (cd "$1" && ls -a; ls sessions 2>/dev/null) | grep -v -e '^t\.jsonl$' -e '^\.hook-debug\.log$' | sort | tr '
+' ' '; }
+  BEFORE="$(snapshot "$TMP")"
+
+  fire_stop "$TMP" "como hago un login" "empeza por el handler"
+
+  [[ ! -f "$TMP/profile.json" ]] && pass "the Stop hook does not recreate profile.json"     || fail "S38a profile.json resurrected while paused: $(cat "$TMP/profile.json")"
+
+  AFTER="$(snapshot "$TMP")"
+  [[ "$BEFORE" == "$AFTER" ]] && pass "a paused turn writes no state at all"     || fail "S38b state dir changed while paused: '$BEFORE' -> '$AFTER'"
+
+  # The downstream damage: with both files on disk, resume refuses and
+  # the user's real level/streak/error-map stay stranded in .paused.
+  OUT=$(SOCRATIC_STATE_DIR="$TMP" bash "$SCRIPTS/resume.sh" 2>&1)
+  if [[ $? -eq 0 && -f "$TMP/profile.json" ]]; then
+    LVL=$(node -e 'const fs=require("fs");console.log(JSON.parse(fs.readFileSync(process.argv[1],"utf-8")).global_level)' "$TMP/profile.json")
+    [[ "$LVL" == "3" ]] && pass "resume restores the profile that was paused"       || fail "S38c resumed at level $LVL, expected the paused level"
+  else
+    fail "S38c resume failed after a paused turn: $OUT"
+  fi
+
+  # And the fix must not be "the Stop hook never writes": an active
+  # profile still gets its bookkeeping.
+  TMP2="$(setup_state 38b)"
+  fire_stop "$TMP2" "como hago un login" "empeza por el handler"
+  node -e '
+    const fs=require("fs");
+    const p=JSON.parse(fs.readFileSync(process.argv[1],"utf-8"));
+    process.exit(p.last_active ? 0 : 1);
+  ' "$TMP2/profile.json"
+  [[ $? -eq 0 ]] && pass "an active profile is still updated"     || fail "S38d the Stop hook stopped recording on an active profile"
+
+  teardown_state "$TMP"; teardown_state "$TMP2"
 fi
 
 # ==========================================================================
