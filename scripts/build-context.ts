@@ -317,18 +317,8 @@ function main(): void {
   const offRamp = Axis.isOffRamp(level)
 
   // The gate is armed on 2-5, disarmed at L1 (the agent is meant to
-  // write), on the off ramp, and while an escape is open — plus the one
-  // exception: template mode arms it at L1 too, borrowing the authorship
-  // half of level 3's contract.
-  //
-  // This mirrors Axis.gateContract deliberately. gate-tool.ts decides;
-  // this only DESCRIBES the decision to the model, and the description has
-  // to match or the model is denied by a rule its context never mentioned.
-  // If you change the borrow rule, change it in both places — S39 asserts
-  // they agree.
-  const borrowed = template !== null && !escaped && level === Axis.MIN_LEVEL
-  const authSpec = borrowed ? Axis.spec(Axis.TEMPLATE_CONTRACT_LEVEL, LEVEL_TABLE) : spec
-  const armed = !escaped && !offRamp && authSpec.may_edit_existing === false
+  // write), on the off ramp, and while an escape is open.
+  const armed = !escaped && !offRamp && spec.may_edit_existing === false
   const filesLeft = Axis.remainingFiles(level, budget, now, LEVEL_TABLE)
 
   // Autonomy baseline for the repo the user is in RIGHT NOW.
@@ -401,10 +391,7 @@ function main(): void {
   } else if (armed) {
     lines.push(
       `authorship: you may CREATE new files (${filesLeft === null ? "unlimited" : `${filesLeft} left today`}, ` +
-        `max ${authSpec.statements_per_file ?? "unlimited"} executable statement(s) each); you may NOT edit existing ones.` +
-        (borrowed
-          ? " This is TEMPLATE MODE, not your level — the gate is armed and will DENY a body, even though level 1 would otherwise let you write one."
-          : ""),
+        `max ${spec.statements_per_file ?? "unlimited"} executable statement(s) each); you may NOT edit existing ones.`,
     )
   }
 

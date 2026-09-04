@@ -126,24 +126,14 @@ code was theirs — at level 1 nothing else in the pipeline measures it.
 
 ## Interaction with the level
 
-This is a delivery mode, not a level change. It never moves
-`global_level`, and it never LOOSENS anything — the only direction it can
-move the contract is tighter.
+This is a delivery mode, not a level change. It does not move
+`global_level` and it does not relax the gate.
 
-- **Level 1. The gate is ARMED here, and it was not before.** This is
-  the mode's reason for existing: the level says the agent writes, and
-  the user has said they would rather type. So the mode borrows the
-  authorship half of level 3's contract — **zero executable statements
-  in a new file, no editing existing ones** — and `PreToolUse` enforces
-  it. Write a body and you will be denied, with a reason that names the
-  mode rather than the level. Deliver the template and stop.
-  The daily file budget is NOT borrowed: it stays level 1's unlimited,
-  because that knob is relief from tedium and typing `package.json`
-  costs the same either way.
-  The comprehension questions of `level-1-implementer.md` still apply —
-  ask them about what they wrote, not about what you would have written.
-  `ship` still outranks all of it: an open escape disarms the mode like
-  it disarms a level.
+- **Level 1.** This is the mode's reason for existing. The level says the
+  agent writes; the user has said, for now, that they would rather type.
+  Honour it: deliver the template and stop. The comprehension questions
+  of `level-1-implementer.md` still apply — ask them about what they
+  wrote, not about what you would have written.
 - **Levels 2 and 3.** These already hand over skeletons, so the mode is
   **not** an override here — it is the SHAPE of what you were already
   going to deliver. It does not raise your statement allowance by one

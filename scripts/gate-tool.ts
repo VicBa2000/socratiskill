@@ -166,7 +166,7 @@ export namespace Gate {
         allow: false,
         rule: "edit-existing",
         reason:
-          `${contract.authority}: ${toolName} is blocked. It only applies to a file that already exists, and changing existing code is implementing — that half is the user's. ` +
+          `LEVEL ${contract.level}: ${toolName} is blocked. It only applies to a file that already exists, and changing existing code is implementing — that half is the user's. ` +
           coach,
       }
     }
@@ -175,7 +175,7 @@ export namespace Gate {
       return {
         allow: false,
         rule: "write-tool",
-        reason: `${contract.authority}: ${toolName} is blocked. ` + coach,
+        reason: `LEVEL ${contract.level}: ${toolName} is blocked. ` + coach,
       }
     }
 
@@ -184,7 +184,7 @@ export namespace Gate {
         allow: false,
         rule: "delegation",
         reason:
-          `${contract.authority}: delegating to a subagent is blocked — a subagent writing the code is the same as you writing it. ` +
+          `LEVEL ${contract.level}: delegating to a subagent is blocked — a subagent writing the code is the same as you writing it. ` +
           coach,
       }
     }
@@ -197,7 +197,7 @@ export namespace Gate {
           allow: false,
           rule: `bash:${hit}`,
           reason:
-            `${contract.authority}: this Bash command writes to a file (${hit}), which is Write with extra steps. ` +
+            `LEVEL ${contract.level}: this Bash command writes to a file (${hit}), which is Write with extra steps. ` +
             "Running the user's tests, git, builds and linters is allowed and encouraged — authoring files is not. " +
             coach,
         }
@@ -224,7 +224,7 @@ export namespace Gate {
         allow: false,
         rule: "write:existing-file",
         reason:
-          `${contract.authority}: ${target} already exists, so writing it is an edit, and editing is implementing. ` +
+          `LEVEL ${contract.level}: ${target} already exists, so writing it is an edit, and editing is implementing. ` +
           "Tell the user what needs to change in it and let them make the change. " +
           coach,
       }
@@ -234,7 +234,7 @@ export namespace Gate {
       return {
         allow: false,
         rule: "write:no-authorship",
-        reason: `${contract.authority}: you do not author files at this level. ` + coach,
+        reason: `LEVEL ${contract.level}: you do not author files at this level. ` + coach,
       }
     }
 
@@ -245,7 +245,7 @@ export namespace Gate {
         allow: false,
         rule: "write:budget-exhausted",
         reason:
-          `${contract.authority}: the daily budget for new files is spent. It resets tomorrow. ` +
+          `LEVEL ${contract.level}: the daily budget for new files is spent. It resets tomorrow. ` +
           "Say so plainly with the count and move on — do not look for another way to put this on disk. " +
           coach,
       }
@@ -258,7 +258,7 @@ export namespace Gate {
         allow: false,
         rule: "write:too-many-lines",
         reason:
-          `${contract.authority}: ${lines} lines exceeds the ${contract.maxLinesPerFile}-line cap for a single new file. ` +
+          `LEVEL ${contract.level}: ${lines} lines exceeds the ${contract.maxLinesPerFile}-line cap for a single new file. ` +
           "A scaffold is a skeleton, not an implementation — create the structure and leave the bodies for the user.",
       }
     }
@@ -280,7 +280,7 @@ export namespace Gate {
           allow: false,
           rule: "write:shape",
           reason:
-            `${contract.authority}: this file has ${statements} executable statement(s); the limit for a new file here is ${allowance}. ` +
+            `LEVEL ${contract.level}: this file has ${statements} executable statement(s); the limit for a new file at this level is ${allowance}. ` +
             "Create the SHAPE — imports, types, signatures, and a TODO in each body saying what it must do — and stop there. " +
             "The empty function the user has to fill is the entire point." +
             shown,
@@ -359,13 +359,7 @@ function main(): void {
   const budget = profile["axis_budget"] as Axis.Budget | undefined
   const escapes = profile["escapes"] as Axis.Escape[] | undefined
 
-  // Template mode, read from the same session file readRung already opens.
-  // The session doc is the AUTHORITY here; the .template-active marker the
-  // bash fast path checks is only a hint that saves a fork, so a stale
-  // marker costs one wasted bun invocation and never a wrong verdict.
-  const contract = Axis.gateContract(
-    level, budget, escapes, now, maxLines(), table, templateActive(),
-  )
+  const contract = Axis.gateContract(level, budget, escapes, now, maxLines(), table)
 
   // Disarmed by L1 (the agent is supposed to write), by the off ramp (the
   // axis is off), or by an open escape. All three are the same decision
@@ -428,19 +422,6 @@ function chargeBudget(lines: number): void {
     })
   } catch {
     /* best-effort: never block a permitted write over bookkeeping */
-  }
-}
-
-/** Whether the user has template mode on for today's session. */
-function templateActive(): boolean {
-  const today = new Date().toISOString().slice(0, 10)
-  const p = join(stateDir(), "sessions", `${today}.json`)
-  if (!existsSync(p)) return false
-  try {
-    const doc = JSON.parse(readFileSync(p, "utf-8")) as { template?: unknown }
-    return doc.template !== undefined && doc.template !== null
-  } catch {
-    return false
   }
 }
 

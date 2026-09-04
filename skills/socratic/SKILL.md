@@ -168,9 +168,8 @@ first word:
   writes the bodies. Run `bun run <plugin-root>/scripts/template.ts <on|off>`
   and show stdout. Exit 2 = already in that state (stderr says so).
 
-  It is a DELIVERY mode, not a level: it never touches `global_level`,
-  and it never loosens the contract — the only direction it can move it is
-  tighter. At level 1 it ARMS the gate (see below). Its reason for existing is level 1,
+  It is a DELIVERY mode, not a level: it does not touch `global_level`
+  and it does not relax the gate. Its reason for existing is level 1,
   where the level says the agent writes and a user who would rather type
   the bodies had to ask for it again every single turn — and, because
   level 1 does not arm the gate, `user_wrote` was never even recorded.

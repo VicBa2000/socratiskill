@@ -359,9 +359,8 @@
   Then it stops. It does not narrate what you are about to write, and
   it does not resolve the trap it just flagged.
 
-  It is a DELIVERY mode, not a level: it never touches your level, and
-  it never loosens anything -- the only direction it can move the
-  contract is tighter. It exists for LEVEL 1, where the level
+  It is a DELIVERY mode, not a level: it does not touch your level and
+  it does not relax the gate. It exists for LEVEL 1, where the level
   says the agent writes the code -- so a user who would rather type had
   to ask for it again in every single turn, and, because level 1 does
   not arm the gate, the plugin never even recorded that the code was
@@ -369,15 +368,8 @@
 
   IT ONLY APPLIES AT LEVELS 1-3, and that boundary is the point:
 
-    L1        OVERRIDE, AND THE GATE IS ARMED. The level says the agent
-              writes; you said you would rather type, so the mode
-              borrows level 3's authorship contract -- zero executable
-              statements in a new file, no editing existing ones -- and
-              the PreToolUse hook ENFORCES it. If the agent tries to
-              write the body, it is denied, and the message names the
-              mode rather than your level. Your daily file budget stays
-              unlimited (that knob is about tedium, not about thinking).
-              `ship` still gets you out in one command.
+    L1        OVERRIDE. The level says the agent writes; you said you
+              would rather type. The mode wins.
     L2-L3     SHAPE ONLY. These levels already hand you skeletons. The
               mode sets what a good one looks like. It does not let the
               agent author one extra line.
@@ -1093,7 +1085,7 @@
   sistemas.txt         full technical reference — every rule, threshold,
                        state file, hook, detector, protocol block
   MANUAL-TEST.md       step-by-step end-to-end test plan (7 scenarios)
-  tests/run-all.sh     functional test suite (38 scenarios, 316 assertions)
+  tests/run-all.sh     functional test suite (39 scenarios, 308 assertions)
   tests/run-security.sh adversarial test suite (8 scenarios, 40 asserts)
   hooks/hooks.json     plugin manifest hook declarations
   CLAUDE.md            contributor-oriented technical notes

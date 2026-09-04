@@ -56,21 +56,7 @@ if [[ "$profile_raw" == *'"global_level"'* ]]; then
   tail_="${tail_#"${tail_%%[![:space:]]*}"}" # strip leading whitespace
   lvl="${tail_:0:1}"
 fi
-# Level 1 is normally the agent's job and ends here — UNLESS the user
-# turned template mode on, which is the one thing that arms the gate at a
-# level whose own contract does not. The marker is a zero-byte file
-# written by template.ts precisely so this check stays a builtin test:
-# locating today's session file from bash would need UTC date math, which
-# means a fork on every tool call and S34's invariant to get wrong.
-#
-# The marker only decides whether to PAY for the engine. gate-tool.ts
-# re-reads the session doc and has the final say, so a marker left over
-# from a previous day costs one wasted bun start, never a wrong verdict.
-if [[ "$lvl" == "1" ]]; then
-  [[ -f "$STATE_DIR/.template-active" ]] || exit 0
-else
-  [[ "$lvl" == [2-5] ]] || exit 0
-fi
+[[ "$lvl" == [2-5] ]] || exit 0
 
 # Only now is it worth consuming stdin and paying for the engine. An open
 # escape also disarms the gate, but detecting one needs real date math, so
