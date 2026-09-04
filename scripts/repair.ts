@@ -103,6 +103,16 @@ function main(): void {
   out(`  paused: ${paused}`)
   out(`          your real profile${d.pausedLevel !== null ? `, at level ${d.pausedLevel}` : ""}.`)
   out("")
+  // Impreso ANTES de cualquier mutacion, y a proposito: --apply borra el
+  // artefacto, o sea que se lleva puesta la unica evidencia de cuando
+  // ocurrio el daño.
+  if (d.artifactWrittenAt) {
+    out(`the damage was done at: ${d.artifactWrittenAt}  (running v${version ?? "?"} now)`)
+    out("  if that timestamp is BEFORE you updated the plugin, this is leftover state and")
+    out("  the code fix is working — the residue simply outlived it, which is what repair is for.")
+    out("  if it is AFTER, the bug is still live and this is worth reporting.")
+    out("")
+  }
 
   if (!apply) {
     out("repair would discard the auto-generated one and restore yours.")

@@ -2009,7 +2009,13 @@ if should_run 40; then
   # The version actually executing. /plugin reports what the marketplace
   # resolved; a stale installed copy makes those differ, and that is the
   # first thing to rule out when a fix did not work.
-  echo "$OUT" | grep -q "^running: v" && pass "reports the version actually executing" || fail "S40d no running version"
+  echo "$OUT" | grep -q "^running: v" && pass "reports the version actually executing" || fail "S40d no running version"
+
+  # --apply DELETES the artifact, so the timestamp saying WHEN the damage
+  # happened dies with it. That number is the only thing separating
+  # "leftover state from before the fix" from "the bug is still live", so
+  # it has to be printed before anything is touched.
+  echo "$OUT" | grep -q "the damage was done at: 2026-09-04T18:48:11" && pass "dates the damage before destroying the evidence" || fail "S40d2 no damage timestamp"
 
   # A DIAGNOSIS MUST NOT MUTATE. This command deletes a profile, and it
   # exists because the plugin already damaged this user state once.

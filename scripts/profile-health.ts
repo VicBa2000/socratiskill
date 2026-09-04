@@ -97,7 +97,24 @@ export namespace ProfileHealth {
      * de B1 y el unico con una respuesta correcta obvia: tirar el
      * artefacto y restaurar el `.paused`.
      */
-    | { kind: "resurrected"; activeLevel: number | null; pausedLevel: number | null }
+    | {
+        kind: "resurrected"
+        activeLevel: number | null
+        pausedLevel: number | null
+        /**
+         * `last_active` del artefacto: CUANDO lo escribio el hook Stop.
+         *
+         * Es el dato que separa dos diagnosticos que se ven iguales. Un
+         * timestamp anterior al update dice "residuo viejo, el codigo ya
+         * esta arreglado y esto es lo que quedo". Uno posterior dice que
+         * hay un segundo camino todavia abierto y que el fix no alcanzo.
+         * Sin esto las dos hipotesis son indistinguibles — y `--apply`
+         * borra el archivo, o sea que destruye la evidencia justo cuando
+         * el usuario mas la necesita. Por eso se imprime ANTES de tocar
+         * nada.
+         */
+        artifactWrittenAt: string | null
+      }
     /**
      * Los dos archivos existen y el activo tiene contenido real — el
      * usuario recalibro durante la pausa, o algo que no previmos. NO se
@@ -110,7 +127,7 @@ export namespace ProfileHealth {
      * restaurar, pero el nivel que el usuario esta viendo es ficticio y
      * hay que decirlo.
      */
-    | { kind: "orphan"; activeLevel: number | null }
+    | { kind: "orphan"; activeLevel: number | null; artifactWrittenAt: string | null }
 
   function readProfile(p: string): Record<string, unknown> | null {
     if (!existsSync(p)) return null
@@ -127,6 +144,12 @@ export namespace ProfileHealth {
     if (!p) return null
     const raw = p["global_level"]
     return typeof raw === "number" ? Math.round(raw) : null
+  }
+
+  function writtenAt(p: Record<string, unknown> | null): string | null {
+    if (!p) return null
+    const raw = p["last_active"]
+    return typeof raw === "string" && raw.length > 0 ? raw : null
   }
 
   export function paths(stateDir: string): { active: string; paused: string } {
@@ -159,14 +182,20 @@ export namespace ProfileHealth {
       // Un `.paused` corrupto no se puede restaurar, asi que no se ofrece
       // como si se pudiera.
       if (!pausedDoc) return { kind: "ambiguous", activeLevel: levelOf(activeDoc), pausedLevel: null }
+      if (!artifact) {
+        return { kind: "ambiguous", activeLevel: levelOf(activeDoc), pausedLevel: levelOf(pausedDoc) }
+      }
       return {
-        kind: artifact ? "resurrected" : "ambiguous",
+        kind: "resurrected",
         activeLevel: levelOf(activeDoc),
         pausedLevel: levelOf(pausedDoc),
+        artifactWrittenAt: writtenAt(activeDoc),
       }
     }
 
-    if (artifact) return { kind: "orphan", activeLevel: levelOf(activeDoc) }
+    if (artifact) {
+      return { kind: "orphan", activeLevel: levelOf(activeDoc), artifactWrittenAt: writtenAt(activeDoc) }
+    }
     return { kind: "ok" }
   }
 
