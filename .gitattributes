@@ -1,0 +1,19 @@
+# Shell scripts are LF in the repository, always.
+#
+# Not cosmetics: a shebang that ends in CRLF makes the kernel look for an
+# interpreter literally named "bash\r", so the script dies with a
+# "bad interpreter" error on Linux and macOS. Windows checkouts run these
+# under Git Bash, which tolerates either, so a CRLF script committed from
+# Windows breaks only for OTHER people — the worst kind of regression to
+# catch, because it looks fine on the machine that introduced it.
+#
+# This happened: tests/run-all.sh was committed with CRLF in v0.5.5 after
+# a script rewrote it preserving the working tree endings. Every other
+# tracked file was, and is, LF in the index.
+*.sh text eol=lf
+
+# Same reasoning for the TypeScript the hooks execute, and for the JSON
+# contracts read by both. Keeping them LF also keeps diffs honest: a
+# whole-file rewrite hides the real change inside 2000 lines of noise.
+*.ts text eol=lf
+*.json text eol=lf
