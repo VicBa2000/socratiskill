@@ -7,7 +7,7 @@
     ╚══════╝ ╚═════╝  ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝   ╚═╝╚══════╝╚═╝  ╚═╝╚═╝╚══════╝╚══════╝
     ──────────────────────────────────────────────────────────────────────────────────────
     ░▒▓█   A D A P T I V E   S O C R A T I C   M E N T O R   F O R   C L A U D E   █▓▒░
-                       >>  v0.5.6 · MIT · github.com/VicBa2000/socratiskill  <<
+                       >>  v0.5.7 · MIT · github.com/VicBa2000/socratiskill  <<
 ```
 
 # Socratiskill
@@ -204,6 +204,35 @@ Invoke as `/socratiskill:socratic <arg>`.
 `pause` fills the gap between `off` (soft) and `disable` (heavy) — the
 sweet spot for "I want zero token cost without touching the plugin
 manifest".
+
+### The state you do not choose: inconsistent
+
+There is a sixth state, and a bug produces it rather than you. Until
+v0.5.3 the `Stop` hook rebuilt `profile.json` while the plugin was
+paused. That rebuilt file carries no level, so the axis fell back to its
+default of 3 — and the following turn *migrated* it, writing level 3 to
+disk for real. The result is the nastiest shape a bug can take: **it
+looks exactly like a healthy state from inside a session.** The context
+prints a level with full authority, it survives restarts, and it is
+indistinguishable from a calibration you never performed, while your real
+profile sits parked in `profile.json.paused` and `resume` refuses to act
+with two profiles present.
+
+**Updating the plugin does not clear this.** The code fix stops new
+damage; the state already on disk outlives it. That is the whole reason
+`repair` exists — and why the symptom can survive an update and look like
+the bug is still live.
+
+```
+/socratiskill:socratic repair          # diagnoses, changes nothing
+/socratiskill:socratic repair --apply  # after you confirm
+```
+
+While the state is broken, every turn's context carries a warning saying
+the level shown is not one you chose. `repair` also dates the damage, so
+a timestamp older than your update tells you it is leftover state rather
+than a live bug — and it prints that before `--apply` deletes the
+evidence along with the problem.
 
 ---
 
@@ -661,7 +690,7 @@ write under interruption, concurrent RMW on `profile.json`,
 antipattern regex bounds, hostile stdin to the hooks, and topic
 injection (null bytes, RTL unicode, shell metacharacters).
 
-Combined: **367 assertions, all green** as of v0.5.6.
+Combined: **367 assertions, all green** as of v0.5.7.
 
 For a manual end-to-end in a live Claude Code session, see
 [MANUAL-TEST.md](./MANUAL-TEST.md).

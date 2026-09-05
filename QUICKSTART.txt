@@ -471,9 +471,17 @@
                                       state kept
     /socratiskill:socratic resume     undo `pause`
 
+    /socratiskill:socratic repair     check the state dir for damage a
+                                      bug left behind, and report which
+                                      version is ACTUALLY running
+
   Both survive across sessions and both are idempotent. Reach for
   `pause` when you want it genuinely invisible for a stretch of work
   without losing your level, streak or error-map.
+
+  If `resume` ever refuses with "both profile.json and
+  profile.json.paused exist", run `repair` — see section 6
+  (TROUBLESHOOTING).
 
   Heavier hammers, in order:
 
@@ -935,6 +943,30 @@
     Fix:   /socratiskill:socratic pause
            Resume any time with /socratiskill:socratic resume.
 
+  Problem: I paused the plugin, and a couple of turns later it was
+           active again at level 3 — a level I never chose. Or:
+           `resume` refuses, saying both profile.json and
+           profile.json.paused exist.
+    Cause: A bug present until v0.5.3: the Stop hook rebuilt
+           profile.json while the plugin was paused. The rebuilt file
+           has no level, so the axis fell back to its default of 3 —
+           and the next turn MIGRATED that file, writing level 3 to
+           disk for real. So the wrong level is persistent, survives a
+           restart, and looks exactly like a calibration you never
+           performed, while your real profile sits parked in
+           profile.json.paused.
+    Fix:   /socratiskill:socratic repair
+           It prints what it found and changes nothing. Confirm, then
+           it discards the auto-generated profile and restores yours.
+
+           UPDATING THE PLUGIN DOES NOT FIX THIS BY ITSELF. The code
+           fix stops new damage; the state already written to disk
+           stays until `repair` removes it. That is why the symptom can
+           survive an update and look like the bug is still live.
+           `repair` prints the artifact's timestamp so you can tell:
+           dated before your update means leftover state, after means a
+           real bug report.
+
   Problem: I disabled / paused / uninstalled the plugin, but the
            model still emits HINT_META or restate/plan preambles.
     Cause: CONTEXT PERSISTENCE. When the plugin was active earlier in
@@ -1046,6 +1078,12 @@
       bash ~/socratiskill/scripts/pause.sh
       bash ~/socratiskill/scripts/resume.sh
 
+    If `resume` refuses because both profile.json and
+    profile.json.paused exist, the state dir was damaged by the
+    pre-v0.5.3 pause bug. Do not delete either file by hand:
+      /socratiskill:socratic repair            (diagnoses only)
+      /socratiskill:socratic repair --apply    (after you confirm)
+
   7.3 PLUGIN-LEVEL DISABLE (Claude Code feature):
     /plugin disable socratiskill
     /plugin enable socratiskill      (to re-enable)
@@ -1085,7 +1123,7 @@
   sistemas.txt         full technical reference — every rule, threshold,
                        state file, hook, detector, protocol block
   MANUAL-TEST.md       step-by-step end-to-end test plan (7 scenarios)
-  tests/run-all.sh     functional test suite (39 scenarios, 308 assertions)
+  tests/run-all.sh     functional test suite (40 scenarios, 327 assertions)
   tests/run-security.sh adversarial test suite (8 scenarios, 40 asserts)
   hooks/hooks.json     plugin manifest hook declarations
   CLAUDE.md            contributor-oriented technical notes

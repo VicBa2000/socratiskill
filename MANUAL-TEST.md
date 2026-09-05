@@ -1,6 +1,6 @@
 # Socratiskill — manual E2E test plan
 
-Thirteen scenarios (+ one sanity check) to validate the plugin in a clean
+Fourteen scenarios (+ one sanity check) to validate the plugin in a clean
 install before release. Each test is marked PASS if the observed result
 matches the expected one.
 
@@ -411,6 +411,69 @@ and nothing else. There is no mode to cross it with any more.
 
 > Note: `off` still costs ~30 tokens/turn for the silencer message.
 > If you want **zero** token cost, use `pause` instead (Scenario 6).
+
+---
+
+## Scenario 14 — `repair` recovers a state dir a bug left broken
+
+**Goal**: the two-profile state is detected, announced on every turn,
+and fixed without ever eating a real profile.
+
+This is the only scenario that reproduces a defect on purpose, because
+this state is the one thing a user cannot recognise on their own: from
+inside a session it looks exactly like a healthy plugin sitting at a
+level they never chose.
+
+1. Note your real level, then pause:
+   ```
+   /socratiskill:socratic status
+   /socratiskill:socratic pause
+   ```
+2. Simulate the damage the pre-v0.5.3 Stop hook did — a profile rebuilt
+   from nothing, which is what made the axis fall back to its default:
+   ```bash
+   printf '%s' '{"last_active":"2020-01-01T00:00:00.000Z","last_user_message_length":19}' \
+     > ~/.claude/socratic/profile.json
+   ```
+3. Send any normal prompt.
+   **Expected**: the context reports `level: 3` — a level nobody chose —
+   *and* carries a `STATE INCONSISTENT` line saying so and naming
+   `repair`. Without that line the wrong level would look authoritative,
+   which is the whole failure mode.
+4. ```
+   /socratiskill:socratic resume
+   ```
+   **Expected**: it REFUSES (`cannot resume: both ... exist`) and points
+   at `repair`. Refusing is correct — with two profiles present it cannot
+   know which one you want.
+5. ```
+   /socratiskill:socratic repair
+   ```
+   **Expected**, and check all four:
+   - a `running: v...` line with the version and path of the code
+     actually executing. On a plugin install the path ends in the
+     version number, so a stale install is visible here.
+   - `the damage was done at: 2020-01-01...` — dated BEFORE any update,
+     i.e. leftover state rather than a live bug.
+   - it names your real level, read from `.paused`, not the fake 3.
+   - **nothing on disk changed.** Both files are still there:
+     ```bash
+     ls ~/.claude/socratic/profile.json*
+     ```
+6. ```
+   /socratiskill:socratic repair --apply
+   ```
+   **Expected**: the auto-generated profile is discarded, `.paused` is
+   restored, and the next prompt reports your original level with no
+   `STATE INCONSISTENT` line. Run `repair` once more: `[ok] state is
+   consistent`.
+
+**The half that matters more** — `repair` must never delete a profile
+someone actually configured. With a healthy calibrated profile in place,
+`/socratiskill:socratic repair --apply` must report `nothing to repair`
+and leave the file untouched. Same for a profile created by
+`init-profile.sh` and never calibrated: it carries session bookkeeping
+too, and only its remaining fields tell it apart from the artifact.
 
 ---
 

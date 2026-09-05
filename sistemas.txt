@@ -7,8 +7,8 @@ per-turn detectors, domain taxonomy, antipatterns, Feynman mode,
 spaced repetition, hooks, persistent state, plugin states, and the
 authorship gate.
 
-Updated for v0.5.4 (September 2026): the `repair` command and the
-inconsistent-state detection it exposes.
+Updated for v0.5.7 (September 2026): the `repair` command and the
+inconsistent-state detection it exposes (section 14.1).
 
 
 TABLE OF CONTENTS
@@ -1142,6 +1142,27 @@ reports: /plugin says what the marketplace resolved, this says
 what is running, and the two diverge when an update did not
 refresh the installed copy. It is the first hypothesis to rule
 out whenever a shipped fix appears not to work.
+
+  Empirically (September 2026): Claude Code caches plugins under
+  ~/.claude/plugins/cache/<mkt>/<plugin>/<VERSION>/, one
+  directory per version. So the path this line prints already
+  contains the running version twice over, and a stale install
+  shows up as a path ending in the old number.
+
+WHEN THE DAMAGE HAPPENED. The diagnosis also prints the
+artifact's `last_active`: the moment the Stop hook wrote it.
+Two opposite conclusions look identical without it —
+
+  timestamp BEFORE the update: leftover state. The code fix
+    works and the residue merely outlived it. This is what
+    `repair` is for.
+  timestamp AFTER the update: a live path the fix did not
+    close, and a real bug report.
+
+It is printed BEFORE any mutation on purpose, because `--apply`
+deletes the artifact and takes that evidence with it. A repair
+tool that destroys the only record of what it repaired makes the
+next occurrence undiagnosable.
 
 
 ================================================================
